@@ -52,3 +52,39 @@
 ## Open Questions
 
 - None at the completion of initial scaffolding.
+
+## Phase 1.1: Engine Facade & Worker Protocol (`branch: phase-1`)
+
+### What Was Done
+- Implemented `PdfDocument` facade (`src/engine/PdfDocument.ts`) exposing `open(buffer, options)`, `pageCount`, `pageSize(pageIndex)`, and `close()`.
+- Implemented Web Worker message protocol (`src/shared/protocol.ts`) and worker message processing loop (`src/workers/pdf.worker.ts`) executing all MuPDF WASM interactions in dedicated worker threads.
+- Enforced zero-copy `Transferable` transfers for document buffers across thread boundaries (`buffer.byteLength === 0` verified upon transfer).
+- Implemented typed errors (`src/shared/errors.ts`): `EncryptedNeedsPasswordError`, `WrongPasswordError`, `CorruptFileError`, `TooLargeError` (configurable ceiling, default 200 MB), and `UnsupportedError`, with serialization across postMessage boundaries.
+- Implemented in-memory synthetic PDF test generator (`tests/helpers/synthetic-pdf.ts`) supporting arbitrary page counts, dimensions, rotations, and RC4-128 encryption.
+- Added comprehensive unit tests in `tests/unit/engine-facade.test.ts`:
+  - Verified `buffer.byteLength === 0` immediately upon transfer to worker.
+  - Verified `EncryptedNeedsPasswordError` on encrypted PDF without credentials.
+  - Verified `WrongPasswordError` on invalid password.
+  - Verified successful decryption and page counting with correct password.
+  - Verified `CorruptFileError` on damaged/invalid buffers.
+  - Verified `TooLargeError` when exceeding configured memory limit.
+  - Verified 500-page synthetic PDF opens metadata-only without page rendering.
+  - Verified `pageSize(i)` correctly returns dimensions in points honoring `/Rotate` (90°) and `CropBox`.
+  - Verified memory and document release on `close()` (active document count dropped from 2 to 0, subsequent calls rejected, `mupdf.emptyStore()` called).
+
+### Test Verification Results
+- `pnpm check` (`eslint .`, `tsc --noEmit`, `vitest run`):
+  - ESLint: 0 errors, 0 warnings.
+  - Typecheck: 0 errors.
+  - Vitest: 4 test files passed, 12 tests passed (440ms).
+- `pnpm test:e2e`:
+  - 1 passed (1.1s) on Chromium.
+- `pnpm build`:
+  - Production bundle & PWA service worker built cleanly (438ms).
+
+### Dependencies Added
+- None (leveraged existing dependencies).
+
+### Open Questions
+- None.
+
