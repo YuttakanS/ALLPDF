@@ -123,4 +123,36 @@
 ### Open Questions
 - None.
 
+## Phase 1.3: Thumbnail Sidebar (`branch: phase-1`)
 
+### What Was Done
+- **Thumbnail Rendering Protocol (`src/shared/protocol.ts`, `src/workers/pdf.worker.ts`)**: Added `PAGE_RENDER_THUMBNAIL` action. Renders whole-page low-resolution views (max dimension 140px, ~60 KB per thumbnail) off-thread, transferring `ImageBitmap` back to the main thread.
+- **Virtualized Thumbnail Sidebar (`src/app/viewer/ThumbnailSidebar.tsx`)**:
+  - Virtualized vertical thumbnail list with fixed 170px item slots. Computes visible range + 2 item buffer.
+  - Even with a 500-page document, the number of mounted thumbnail items in the DOM is strictly bounded ($\le 15$ items; measured: 7 items).
+  - High-priority viewport protection: thumbnail requests are scheduled at low priority via `requestIdleCallback` (with `setTimeout` fallback), ensuring thumbnail rendering never contends with main-viewport tile requests.
+  - Synchronized active-page highlight ring (`rgb(26, 115, 232)` / `#1a73e8`).
+  - Click-to-jump handler scrolling the main viewport smoothly to the clicked page.
+  - Sidebar toggle button in `PdfViewer` toolbar (`☰ หน้าตัวอย่าง`).
+- **E2E Acceptance Test (`tests/e2e/thumbnails.spec.ts`)**:
+  - Opened 500-page synthetic PDF.
+  - Verified main-viewport first page render latency remained undegraded: **316 ms** with thumbnails active.
+  - Verified thumbnail DOM node count stayed capped at **7 items** (asserted $\le 15$).
+  - Verified scrolling down sidebar to page 50, clicking thumbnail 50, and confirming main viewport and toolbar page number updated to 50.
+  - Verified sidebar toggle hide/show.
+
+### Test Verification Results
+- `pnpm check`:
+  - ESLint: 0 errors, 0 warnings.
+  - Typecheck: 0 errors.
+  - Vitest: 5 test files, 15 tests passed (556ms).
+- `pnpm build`:
+  - Production bundle & PWA service worker built cleanly (1.03s).
+- `pnpm test:e2e`:
+  - 3 passed (3.1s) on Chromium (`smoke.spec.ts`, `viewer.spec.ts`, `thumbnails.spec.ts`).
+
+### Dependencies Added
+- None (leveraged existing dependencies).
+
+### Open Questions
+- None.

@@ -13,6 +13,8 @@ import type {
   DocOpenResult,
   DocPageSizePayload,
   DocPageSizeResult,
+  PageRenderThumbnailPayload,
+  PageRenderThumbnailResult,
   PageRenderTilePayload,
   PageRenderTileResult,
   WorkerRequestEnvelope,
@@ -188,6 +190,64 @@ export async function processWorkerRequest(
             tileH,
             scale,
             generation,
+            rawBuffer,
+          };
+          return {
+            reply: { id, action, success: true, result },
+            transfers: [rawBuffer],
+          };
+        }
+      }
+
+      case 'PAGE_RENDER_THUMBNAIL': {
+        const payload = request.payload as PageRenderThumbnailPayload;
+        const doc = activeDocs.get(payload.docId);
+        if (!doc) {
+          throw new CorruptFileError(`Document ${payload.docId} is not loaded or has been closed.`);
+        }
+
+        const page = doc.loadPage(payload.pageIndex);
+        const bounds = page.getBounds(mupdf.Page.CROP_BOX);
+        const pW = Math.abs(bounds[2] - bounds[0]);
+        const pH = Math.abs(bounds[3] - bounds[1]);
+
+        const maxDim = payload.maxDim ?? 140;
+        const scale = maxDim / Math.max(pW, pH);
+
+        const ctm = mupdf.Matrix.scale(scale, scale);
+        const pixmap = page.toPixmap(ctm, mupdf.ColorSpace.DeviceRGB, true);
+        const thumbW = pixmap.getWidth();
+        const thumbH = pixmap.getHeight();
+        const pixels = pixmap.getPixels();
+
+        if (typeof createImageBitmap === 'function' && typeof ImageData === 'function') {
+          const imgData = new ImageData(
+            new Uint8ClampedArray(pixels.buffer as ArrayBuffer, pixels.byteOffset, pixels.byteLength),
+            thumbW,
+            thumbH
+          );
+          const bitmap = await createImageBitmap(imgData);
+          const result: PageRenderThumbnailResult = {
+            docId: payload.docId,
+            pageIndex: payload.pageIndex,
+            width: thumbW,
+            height: thumbH,
+            bitmap,
+          };
+          return {
+            reply: { id, action, success: true, result },
+            transfers: [bitmap],
+          };
+        } else {
+          const rawBuffer = (pixels.buffer as ArrayBuffer).slice(
+            pixels.byteOffset,
+            pixels.byteOffset + pixels.byteLength
+          );
+          const result: PageRenderThumbnailResult = {
+            docId: payload.docId,
+            pageIndex: payload.pageIndex,
+            width: thumbW,
+            height: thumbH,
             rawBuffer,
           };
           return {

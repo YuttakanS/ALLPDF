@@ -122,8 +122,16 @@ export class WorkerClient {
     return res.size;
   }
 
-  async renderTile(payload: import('../shared/protocol').PageRenderTilePayload): Promise<import('../shared/protocol').PageRenderTileResult> {
+  async renderTile(
+    payload: import('../shared/protocol').PageRenderTilePayload
+  ): Promise<import('../shared/protocol').PageRenderTileResult> {
     return this.send('PAGE_RENDER_TILE', payload);
+  }
+
+  async renderThumbnail(
+    payload: import('../shared/protocol').PageRenderThumbnailPayload
+  ): Promise<import('../shared/protocol').PageRenderThumbnailResult> {
+    return this.send('PAGE_RENDER_THUMBNAIL', payload);
   }
 
   async closeDoc(docId: string): Promise<DocCloseResult> {

@@ -9,7 +9,12 @@ export interface PageSize {
   rotate: number;
 }
 
-export type WorkerAction = 'DOC_OPEN' | 'DOC_PAGE_SIZE' | 'DOC_CLOSE' | 'PAGE_RENDER_TILE';
+export type WorkerAction =
+  | 'DOC_OPEN'
+  | 'DOC_PAGE_SIZE'
+  | 'DOC_CLOSE'
+  | 'PAGE_RENDER_TILE'
+  | 'PAGE_RENDER_THUMBNAIL';
 
 export interface DocOpenPayload {
   docId: string;
@@ -63,6 +68,21 @@ export interface PageRenderTileResult {
   tileH: number;
   scale: number;
   generation: number;
+  bitmap?: ImageBitmap;
+  rawBuffer?: ArrayBuffer;
+}
+
+export interface PageRenderThumbnailPayload {
+  docId: string;
+  pageIndex: number;
+  maxDim?: number; // e.g. 140 px
+}
+
+export interface PageRenderThumbnailResult {
+  docId: string;
+  pageIndex: number;
+  width: number;
+  height: number;
   bitmap?: ImageBitmap;
   rawBuffer?: ArrayBuffer;
 }

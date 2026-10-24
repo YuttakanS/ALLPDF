@@ -79,6 +79,23 @@ export class PdfDocument {
   }
 
   /**
+   * Renders a low-resolution thumbnail image off-thread at low priority.
+   */
+  async renderThumbnail(
+    pageIndex: number,
+    maxDim = 140
+  ): Promise<import('../shared/protocol').PageRenderThumbnailResult> {
+    if (this._isClosed) {
+      throw new Error(`Cannot render thumbnail: document ${this._docId} has been closed.`);
+    }
+    return this._client.renderThumbnail({
+      docId: this._docId,
+      pageIndex,
+      maxDim,
+    });
+  }
+
+  /**
    * Closes the document, releases worker handles and memory, and terminates the worker session.
    */
   async close(): Promise<void> {

@@ -10,6 +10,7 @@ import {
   ZOOM_STEP,
 } from './constants';
 import { PageView } from './PageView';
+import { ThumbnailSidebar } from './ThumbnailSidebar';
 import { TileCache } from './tile-cache';
 
 export interface PdfViewerProps {
@@ -28,6 +29,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
   const [pageInput, setPageInput] = useState<string>('1');
   const [generation, setGeneration] = useState<number>(1);
   const [tileRenderCount, setTileRenderCount] = useState<number>(0);
+  const [showSidebar, setShowSidebar] = useState<boolean>(true);
 
   const tileCache = useMemo(() => new TileCache(128 * 1024 * 1024), []);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -131,10 +133,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
 
   const fitWidth = useCallback(() => {
     if (pageSizes.length === 0 || !pageSizes[0]) return;
-    const availableWidth = viewportWidth - 64; // account for padding
+    const availableWidth = viewportWidth - (showSidebar ? 180 : 0) - 64; // account for sidebar & padding
     const targetZoom = availableWidth / pageSizes[0].width;
     applyZoom(targetZoom);
-  }, [pageSizes, viewportWidth, applyZoom]);
+  }, [pageSizes, viewportWidth, showSidebar, applyZoom]);
 
   const fitPage = useCallback(() => {
     if (pageSizes.length === 0 || !pageSizes[0]) return;
@@ -228,6 +230,22 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
           zIndex: 10,
         }}
       >
+        <button
+          onClick={() => setShowSidebar((s) => !s)}
+          data-testid="toggle-sidebar-btn"
+          title="Toggle Sidebar"
+          style={{
+            padding: '4px 8px',
+            backgroundColor: showSidebar ? '#e8f0fe' : '#f1f3f4',
+            color: showSidebar ? '#1a73e8' : '#3c4043',
+            border: '1px solid #dadce0',
+            borderRadius: '4px',
+            cursor: 'pointer',
+          }}
+        >
+          ☰ หน้าตัวอย่าง
+        </button>
+
         <button onClick={zoomOut} data-testid="zoom-out-btn" title="Zoom Out (-)">
           -
         </button>
@@ -265,52 +283,63 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
         </div>
       </div>
 
-      {/* Virtualized Vertical Page Container */}
-      <div
-        ref={containerRef}
-        data-testid="viewer-container"
-        onScroll={handleScroll}
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          overflowX: 'auto',
-          position: 'relative',
-          padding: '24px 0',
-        }}
-      >
-        {/* Full scroll height spacer */}
+      {/* Main Body: Sidebar + Virtualized Page Viewport */}
+      <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
+        <ThumbnailSidebar
+          doc={doc}
+          pageCount={doc.pageCount}
+          currentPage={currentPage}
+          onSelectPage={scrollToPage}
+          isOpen={showSidebar}
+        />
+
+        {/* Virtualized Vertical Page Container */}
         <div
+          ref={containerRef}
+          data-testid="viewer-container"
+          onScroll={handleScroll}
           style={{
-            height: `${totalHeight}px`,
+            flex: 1,
+            overflowY: 'auto',
+            overflowX: 'auto',
             position: 'relative',
-            width: '100%',
+            padding: '24px 0',
           }}
         >
-          {visiblePages.map((layout) => (
-            <div
-              key={layout.index}
-              style={{
-                position: 'absolute',
-                top: `${layout.top}px`,
-                left: '50%',
-                transform: 'translateX(-50%)',
-              }}
-            >
-              <PageView
-                doc={doc}
-                pageIndex={layout.index}
-                pageSize={layout.size}
-                scale={zoom}
-                dpr={dpr}
-                generation={generation}
-                tileCache={tileCache}
-                viewportTop={bufferTop}
-                viewportBottom={bufferBottom}
-                pageTop={layout.top}
-                onTileRendered={() => setTileRenderCount((c) => c + 1)}
-              />
-            </div>
-          ))}
+          {/* Full scroll height spacer */}
+          <div
+            style={{
+              height: `${totalHeight}px`,
+              position: 'relative',
+              width: '100%',
+            }}
+          >
+            {visiblePages.map((layout) => (
+              <div
+                key={layout.index}
+                style={{
+                  position: 'absolute',
+                  top: `${layout.top}px`,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                }}
+              >
+                <PageView
+                  doc={doc}
+                  pageIndex={layout.index}
+                  pageSize={layout.size}
+                  scale={zoom}
+                  dpr={dpr}
+                  generation={generation}
+                  tileCache={tileCache}
+                  viewportTop={bufferTop}
+                  viewportBottom={bufferBottom}
+                  pageTop={layout.top}
+                  onTileRendered={() => setTileRenderCount((c) => c + 1)}
+                />
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
