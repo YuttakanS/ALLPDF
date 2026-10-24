@@ -1,22 +1,35 @@
-import type { PageSize } from '../shared/protocol';
-import { WorkerClient, type IWorkerTransport } from './worker-client';
+import type { PageExportSpec, PageSize } from '../shared/protocol';
+import {
+  WorkerClient,
+  type IWorkerTransport,
+  getDefaultWorkerClient,
+} from './worker-client';
 
 export interface OpenPdfOptions {
   password?: string;
   maxBytes?: number;
   transport?: IWorkerTransport;
+  client?: WorkerClient;
+  isolated?: boolean;
 }
 
 export class PdfDocument {
   private readonly _docId: string;
   private readonly _pageCount: number;
   private readonly _client: WorkerClient;
+  private readonly _ownsClient: boolean;
   private _isClosed = false;
 
-  private constructor(docId: string, pageCount: number, client: WorkerClient) {
+  private constructor(
+    docId: string,
+    pageCount: number,
+    client: WorkerClient,
+    ownsClient = false
+  ) {
     this._docId = docId;
     this._pageCount = pageCount;
     this._client = client;
+    this._ownsClient = ownsClient;
   }
 
   get docId(): string {
@@ -31,13 +44,20 @@ export class PdfDocument {
     return this._isClosed;
   }
 
+  get client(): WorkerClient {
+    return this._client;
+  }
+
   /**
    * Opens a PDF from an ArrayBuffer using zero-copy transfer to the worker.
    * The buffer is transferred (buffer.byteLength becomes 0 on the caller).
    */
   static async open(buffer: ArrayBuffer, options?: OpenPdfOptions): Promise<PdfDocument> {
     const docId = `doc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    const client = new WorkerClient(options?.transport);
+    const ownsClient = Boolean(options?.transport || options?.isolated);
+    const client =
+      options?.client ??
+      (ownsClient ? new WorkerClient(options?.transport) : getDefaultWorkerClient());
 
     try {
       const { pageCount } = await client.openDoc(
@@ -46,9 +66,11 @@ export class PdfDocument {
         options?.password,
         options?.maxBytes
       );
-      return new PdfDocument(docId, pageCount, client);
+      return new PdfDocument(docId, pageCount, client, ownsClient);
     } catch (err) {
-      client.terminate();
+      if (ownsClient) {
+        client.terminate();
+      }
       throw err;
     }
   }
@@ -96,7 +118,17 @@ export class PdfDocument {
   }
 
   /**
-   * Closes the document, releases worker handles and memory, and terminates the worker session.
+   * Builds an output PDF containing the specified page references across open documents.
+   */
+  async exportPages(pages: PageExportSpec[]): Promise<ArrayBuffer> {
+    if (this._isClosed) {
+      throw new Error(`Cannot export pages: document ${this._docId} has been closed.`);
+    }
+    return this._client.exportPages(pages);
+  }
+
+  /**
+   * Closes the document, releases worker handles and memory, and terminates the worker session if owned.
    */
   async close(): Promise<void> {
     if (this._isClosed) return;
@@ -104,7 +136,9 @@ export class PdfDocument {
     try {
       await this._client.closeDoc(this._docId);
     } finally {
-      this._client.terminate();
+      if (this._ownsClient) {
+        this._client.terminate();
+      }
     }
   }
 }

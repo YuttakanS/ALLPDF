@@ -138,10 +138,34 @@ export class WorkerClient {
     return this.send('DOC_CLOSE', { docId });
   }
 
+  async exportPages(pages: import('../shared/protocol').PageExportSpec[]): Promise<ArrayBuffer> {
+    const res = await this.send<
+      import('../shared/protocol').DocExportPagesPayload,
+      import('../shared/protocol').DocExportPagesResult
+    >('DOC_EXPORT_PAGES', { pages });
+    return res.buffer;
+  }
+
   terminate(): void {
     if (this.transport.terminate) {
       this.transport.terminate();
     }
     this.pendingRequests.clear();
+  }
+}
+
+let defaultClientInstance: WorkerClient | null = null;
+
+export function getDefaultWorkerClient(): WorkerClient {
+  if (!defaultClientInstance) {
+    defaultClientInstance = new WorkerClient();
+  }
+  return defaultClientInstance;
+}
+
+export function resetDefaultWorkerClient(): void {
+  if (defaultClientInstance) {
+    defaultClientInstance.terminate();
+    defaultClientInstance = null;
   }
 }

@@ -14,7 +14,8 @@ export type WorkerAction =
   | 'DOC_PAGE_SIZE'
   | 'DOC_CLOSE'
   | 'PAGE_RENDER_TILE'
-  | 'PAGE_RENDER_THUMBNAIL';
+  | 'PAGE_RENDER_THUMBNAIL'
+  | 'DOC_EXPORT_PAGES';
 
 export interface DocOpenPayload {
   docId: string;
@@ -85,6 +86,20 @@ export interface PageRenderThumbnailResult {
   height: number;
   bitmap?: ImageBitmap;
   rawBuffer?: ArrayBuffer;
+}
+
+export interface PageExportSpec {
+  sourceDocId: string;
+  sourcePageIndex: number;
+  rotationDelta: number;
+}
+
+export interface DocExportPagesPayload {
+  pages: PageExportSpec[];
+}
+
+export interface DocExportPagesResult {
+  buffer: ArrayBuffer;
 }
 
 export interface WorkerRequestEnvelope<T = unknown> {

@@ -5,3 +5,5 @@ export const DEFAULT_ZOOM = 1.0;
 export const ZOOM_STEP = 0.15;
 export const PAGE_GAP = 16; // CSS px between pages in vertical scroll
 export const VIEWPORT_MARGIN = 1.0; // 1-viewport buffer above and below visible area
+export const FIT_WIDTH_MARGIN = 48;
+export const FIT_PAGE_MARGIN = 64;

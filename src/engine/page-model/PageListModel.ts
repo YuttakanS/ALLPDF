@@ -1,7 +1,9 @@
 import { CommandManager } from './CommandManager';
 import {
+  AddDocumentPagesCommand,
   DeletePagesCommand,
   MovePagesCommand,
+  RemoveDocumentCommand,
   RestorePagesCommand,
   RotatePagesCommand,
 } from './commands';
@@ -11,6 +13,7 @@ export class PageListModel {
   private _pages: PageEntry[] = [];
   private commandManager: CommandManager;
   private listeners = new Set<() => void>();
+  private _collapsedDocs = new Set<string>();
 
   constructor(entries: PageEntry[] = [], historyLimit = 100) {
     this._pages = entries.map((e) => ({ ...e }));
@@ -98,16 +101,14 @@ export class PageListModel {
 
     const idSet = new Set(pageIds);
     if (direction === 'up') {
-      // Find the first selected page that can move up
       const firstActiveIdx = activePages.findIndex((p) => idSet.has(p.id));
-      if (firstActiveIdx <= 0) return; // already at top
+      if (firstActiveIdx <= 0) return;
 
       const target = activePages[firstActiveIdx - 1];
       if (target) {
         this.movePages(pageIds, target.id, 'before');
       }
     } else {
-      // Find the last selected page that can move down
       let lastActiveIdx = -1;
       for (let i = activePages.length - 1; i >= 0; i--) {
         const p = activePages[i];
@@ -117,13 +118,44 @@ export class PageListModel {
         }
       }
 
-      if (lastActiveIdx === -1 || lastActiveIdx >= activePages.length - 1) return; // already at bottom
+      if (lastActiveIdx === -1 || lastActiveIdx >= activePages.length - 1) return;
 
       const target = activePages[lastActiveIdx + 1];
       if (target) {
         this.movePages(pageIds, target.id, 'after');
       }
     }
+  }
+
+  addDocumentPages(sourceDocId: string, pageCount: number): void {
+    this.commandManager.execute(new AddDocumentPagesCommand(this, sourceDocId, pageCount));
+  }
+
+  removeDocument(sourceDocId: string): void {
+    this.commandManager.execute(new RemoveDocumentCommand(this, sourceDocId));
+  }
+
+  getDocumentIds(): string[] {
+    const docIds: string[] = [];
+    for (const page of this.getActivePages()) {
+      if (!docIds.includes(page.sourceDocId)) {
+        docIds.push(page.sourceDocId);
+      }
+    }
+    return docIds;
+  }
+
+  isDocCollapsed(sourceDocId: string): boolean {
+    return this._collapsedDocs.has(sourceDocId);
+  }
+
+  toggleDocCollapse(sourceDocId: string): void {
+    if (this._collapsedDocs.has(sourceDocId)) {
+      this._collapsedDocs.delete(sourceDocId);
+    } else {
+      this._collapsedDocs.add(sourceDocId);
+    }
+    this.notifyChange();
   }
 
   extractSelection(pageIds: string[]): PageEntry[] {

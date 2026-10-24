@@ -1,9 +1,18 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import type { PdfDocument } from '../../engine';
 import { PageListModel } from '../../engine/page-model';
+import { executeSplit, downloadFile, type SplitGroup } from '../../engine/split';
 import type { PageSize } from '../../shared/protocol';
 import {
   DEFAULT_ZOOM,
+  FIT_PAGE_MARGIN,
+  FIT_WIDTH_MARGIN,
   MAX_ZOOM,
   MIN_ZOOM,
   PAGE_GAP,
@@ -11,6 +20,7 @@ import {
   ZOOM_STEP,
 } from './constants';
 import { PageView } from './PageView';
+import { SplitDialog } from './SplitDialog';
 import { ThumbnailSidebar } from './ThumbnailSidebar';
 import { TileCache } from './tile-cache';
 
@@ -26,8 +36,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   initialPageModel,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   const [zoom, setZoom] = useState<number>(initialZoom);
-  const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
+  const [docs, setDocs] = useState<Map<string, PdfDocument>>(() => new Map([[doc.docId, doc]]));
+  const [docMetaMap, setDocMetaMap] = useState<Record<string, { name: string; pageCount: number }>>(() => ({
+    [doc.docId]: { name: 'เอกสารหลัก (Primary)', pageCount: doc.pageCount },
+  }));
+  const [pageSizes, setPageSizes] = useState<Map<string, PageSize>>(new Map());
   const [scrollTop, setScrollTop] = useState<number>(0);
   const [viewportHeight, setViewportHeight] = useState<number>(800);
   const [viewportWidth, setViewportWidth] = useState<number>(1000);
@@ -36,6 +52,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [generation, setGeneration] = useState<number>(1);
   const [tileRenderCount, setTileRenderCount] = useState<number>(0);
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
+  const [showSplitDialog, setShowSplitDialog] = useState<boolean>(false);
 
   // Non-destructive page list model & command manager
   const [pageModel] = useState<PageListModel>(
@@ -48,7 +65,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const tileCache = useMemo(() => new TileCache(128 * 1024 * 1024), []);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
-  // Subscribe to model changes (rotations, deletions, reordering, undo/redo)
+  // Subscribe to model changes (rotations, deletions, reordering, undo/redo, merges)
   useEffect(() => {
     return pageModel.subscribe(() => {
       setModelVersion((v) => v + 1);
@@ -56,28 +73,29 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     });
   }, [pageModel]);
 
-  // Load all base page dimensions on mount
-  useEffect(() => {
-    let active = true;
-
-    async function loadSizes() {
-      const sizes: PageSize[] = [];
-      for (let i = 0; i < doc.pageCount; i++) {
-        const s = await doc.pageSize(i);
-        sizes.push(s);
-      }
-      if (active) {
-        setPageSizes(sizes);
-      }
+  // Load dimensions for a specific document
+  const loadDocSizes = useCallback(async (targetDoc: PdfDocument) => {
+    const loaded = new Map<string, PageSize>();
+    for (let i = 0; i < targetDoc.pageCount; i++) {
+      const s = await targetDoc.pageSize(i);
+      loaded.set(`${targetDoc.docId}:${i}`, s);
     }
+    setPageSizes((prev) => {
+      const next = new Map(prev);
+      for (const [k, v] of loaded.entries()) {
+        next.set(k, v);
+      }
+      return next;
+    });
+  }, []);
 
-    loadSizes();
-
+  // Load initial document sizes on mount
+  useEffect(() => {
+    loadDocSizes(doc);
     return () => {
-      active = false;
       tileCache.clear();
     };
-  }, [doc, tileCache]);
+  }, [doc, loadDocSizes, tileCache]);
 
   // Track viewport container dimensions with ResizeObserver
   useEffect(() => {
@@ -97,11 +115,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   const activePages = pageModel.getActivePages();
 
-  // Compute cumulative vertical layout considering rotation dimensions
+  // Compute cumulative vertical layout considering mixed page sizes & rotation dimensions
   const pageLayouts = useMemo(() => {
     let top = 0;
     return activePages.map((entry, index) => {
-      const size = pageSizes[entry.sourcePageIndex] || { width: 612, height: 792, rotate: 0 };
+      const sizeKey = `${entry.sourceDocId}:${entry.sourcePageIndex}`;
+      const size = pageSizes.get(sizeKey) || { width: 612, height: 792, rotate: 0 };
       const isRotatedQuarter = entry.rotationDelta === 90 || entry.rotationDelta === 270;
       const width = (isRotatedQuarter ? size.height : size.width) * zoom;
       const height = (isRotatedQuarter ? size.width : size.height) * zoom;
@@ -164,27 +183,31 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const zoomOut = useCallback(() => applyZoom(zoom - ZOOM_STEP), [applyZoom, zoom]);
 
   const fitWidth = useCallback(() => {
-    if (pageLayouts.length === 0 || !pageLayouts[0]) return;
-    const availableWidth = viewportWidth - (showSidebar ? 180 : 0) - 64;
-    const targetZoom = availableWidth / (pageLayouts[0].size.width || 612);
-    applyZoom(targetZoom);
-  }, [pageLayouts, viewportWidth, showSidebar, applyZoom]);
+    const active = pageLayouts.find((l) => l.entry.id === currentPageId) || pageLayouts[0];
+    const width = active ? active.size.width : 612;
+    if (width > 0 && viewportWidth > 0) {
+      const targetZoom = (viewportWidth - FIT_WIDTH_MARGIN) / width;
+      applyZoom(targetZoom);
+    }
+  }, [pageLayouts, currentPageId, viewportWidth, applyZoom]);
 
   const fitPage = useCallback(() => {
-    if (pageLayouts.length === 0 || !pageLayouts[0]) return;
-    const availableHeight = viewportHeight - 64;
-    const targetZoom = availableHeight / (pageLayouts[0].size.height || 792);
-    applyZoom(targetZoom);
-  }, [pageLayouts, viewportHeight, applyZoom]);
+    const active = pageLayouts.find((l) => l.entry.id === currentPageId) || pageLayouts[0];
+    const height = active ? active.size.height : 792;
+    if (height > 0 && viewportHeight > 0) {
+      const targetZoom = (viewportHeight - FIT_PAGE_MARGIN) / height;
+      applyZoom(targetZoom);
+    }
+  }, [pageLayouts, currentPageId, viewportHeight, applyZoom]);
 
-  // Jump to page by ID or number
+  // Scroll main viewport to target page entry ID
   const scrollToPageId = useCallback(
     (pageId: string) => {
-      const target = pageLayouts.find((l) => l.entry.id === pageId);
-      if (target && containerRef.current) {
-        containerRef.current.scrollTo({ top: target.top, behavior: 'smooth' });
+      const layout = pageLayouts.find((l) => l.entry.id === pageId);
+      if (layout && containerRef.current) {
+        containerRef.current.scrollTo({ top: layout.top, behavior: 'smooth' });
         setCurrentPageId(pageId);
-        setPageInput(String(target.index + 1));
+        setPageInput(String(layout.index + 1));
       }
     },
     [pageLayouts]
@@ -192,11 +215,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   const handlePageInputSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const num = parseInt(pageInput, 10);
-    if (!isNaN(num) && num >= 1 && num <= activePages.length) {
-      const target = pageLayouts[num - 1];
-      if (target) {
-        scrollToPageId(target.entry.id);
+    const pageNum = parseInt(pageInput, 10);
+    if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= activePages.length) {
+      const targetEntry = activePages[pageNum - 1];
+      if (targetEntry) {
+        scrollToPageId(targetEntry.id);
       }
     } else {
       const currentIdx = activePages.findIndex((p) => p.id === currentPageId);
@@ -204,26 +227,24 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     }
   };
 
-  // Multi-selection management (Click, Ctrl-Click, Shift-Click)
+  // Multi-selection handlers
   const handleToggleSelect = useCallback(
     (pageId: string, isShift: boolean, isCtrl: boolean) => {
       setSelectedPageIds((prev) => {
         const next = new Set(prev);
 
         if (isShift && lastSelectedId) {
-          // Range selection between lastSelectedId and pageId
-          const startIdx = activePages.findIndex((p) => p.id === lastSelectedId);
-          const endIdx = activePages.findIndex((p) => p.id === pageId);
-          if (startIdx !== -1 && endIdx !== -1) {
-            const min = Math.min(startIdx, endIdx);
-            const max = Math.max(startIdx, endIdx);
+          const fromIdx = activePages.findIndex((p) => p.id === lastSelectedId);
+          const toIdx = activePages.findIndex((p) => p.id === pageId);
+          if (fromIdx !== -1 && toIdx !== -1) {
+            const min = Math.min(fromIdx, toIdx);
+            const max = Math.max(fromIdx, toIdx);
             for (let i = min; i <= max; i++) {
               const p = activePages[i];
               if (p) next.add(p.id);
             }
           }
         } else if (isCtrl) {
-          // Toggle selection
           if (next.has(pageId)) {
             next.delete(pageId);
           } else {
@@ -231,7 +252,6 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           }
           setLastSelectedId(pageId);
         } else {
-          // Single selection
           next.clear();
           next.add(pageId);
           setLastSelectedId(pageId);
@@ -258,7 +278,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     return currentPageId ? [currentPageId] : [];
   }, [selectedPageIds, currentPageId]);
 
-  // Operations handlers
+  // Page Operations handlers
   const handleRotate = useCallback(
     (degrees: 90 | -90 | 180) => {
       const targets = getTargetPageIds();
@@ -283,70 +303,172 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     pageModel.movePagesRelative(targets, 'down');
   }, [pageModel, getTargetPageIds]);
 
-  // Keyboard navigation & operations shortcuts
+  // File Merge Handlers
+  const handleAddFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const list = Array.from(files);
+      for (const file of list) {
+        if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+          continue;
+        }
+        try {
+          const buffer = await file.arrayBuffer();
+          const newDoc = await (doc.constructor as typeof PdfDocument).open(buffer, {
+            client: doc.client,
+          });
+
+          setDocs((prev) => new Map(prev).set(newDoc.docId, newDoc));
+          setDocMetaMap((prev) => ({
+            ...prev,
+            [newDoc.docId]: { name: file.name, pageCount: newDoc.pageCount },
+          }));
+
+          await loadDocSizes(newDoc);
+          pageModel.addDocumentPages(newDoc.docId, newDoc.pageCount);
+        } catch (err) {
+          console.error('Failed to open PDF for merge:', err);
+        }
+      }
+    },
+    [doc, loadDocSizes, pageModel]
+  );
+
+  const handleRemoveDoc = useCallback(
+    (targetDocId: string) => {
+      pageModel.removeDocument(targetDocId);
+    },
+    [pageModel]
+  );
+
+  // Split Handler
+  const handleExecuteSplit = useCallback(
+    async (groups: SplitGroup[]) => {
+      const active = pageModel.getActivePages();
+      const output = await executeSplit(
+        active,
+        groups,
+        (specs) => doc.client.exportPages(specs),
+        'split_document'
+      );
+      downloadFile(output);
+    },
+    [doc.client, pageModel]
+  );
+
+  const selectedActiveIndices = useMemo(() => {
+    const active = pageModel.getActivePages();
+    const indices: number[] = [];
+    active.forEach((p, idx) => {
+      if (selectedPageIds.has(p.id)) indices.push(idx);
+    });
+    return indices;
+  }, [pageModel, selectedPageIds]);
+
+  // Drag and drop onto container for Merge
+  const handleContainerDragOver = (e: React.DragEvent) => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  };
+
+  const handleContainerDrop = (e: React.DragEvent) => {
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      e.preventDefault();
+      handleAddFiles(e.dataTransfer.files);
+    }
+  };
+
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
-        e.preventDefault();
-        if (e.shiftKey) {
-          pageModel.redo();
-        } else {
+      if (e.ctrlKey || e.metaKey) {
+        if (e.key === 'z' && !e.shiftKey) {
+          e.preventDefault();
           pageModel.undo();
+        } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
+          e.preventDefault();
+          pageModel.redo();
+        } else if (e.key === 'a') {
+          e.preventDefault();
+          selectAll();
+        } else if (e.key === '=' || e.key === '+') {
+          e.preventDefault();
+          zoomIn();
+        } else if (e.key === '-') {
+          e.preventDefault();
+          zoomOut();
+        } else if (e.key === '0') {
+          e.preventDefault();
+          fitWidth();
         }
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
-        pageModel.redo();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-        e.preventDefault();
-        selectAll();
+        handleDelete();
       } else if (e.key === 'Escape') {
         clearSelection();
-      } else if (e.key === 'Delete' || e.key === 'Backspace') {
-        if (selectedPageIds.size > 0) {
-          e.preventDefault();
-          handleDelete();
-        }
-      } else if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
-        e.preventDefault();
-        zoomIn();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === '-') {
-        e.preventDefault();
-        zoomOut();
-      } else if ((e.ctrlKey || e.metaKey) && e.key === '0') {
-        e.preventDefault();
-        fitWidth();
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pageModel, selectedPageIds, selectAll, clearSelection, handleDelete, zoomIn, zoomOut, fitWidth]);
+  }, [pageModel, zoomIn, zoomOut, fitWidth, handleDelete, selectAll, clearSelection]);
 
   return (
     <div
+      data-testid="pdf-viewer"
+      onDragOver={handleContainerDragOver}
+      onDrop={handleContainerDrop}
       style={{
         display: 'flex',
         flexDirection: 'column',
-        height: '100%',
         width: '100%',
+        height: '100vh',
         backgroundColor: '#f1f3f4',
+        overflow: 'hidden',
+        fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
-      {/* Primary Toolbar: Zoom & Navigation */}
+      {/* Hidden File Input for Merge */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept=".pdf,application/pdf"
+        data-testid="file-merge-input"
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          if (e.target.files) {
+            handleAddFiles(e.target.files);
+            e.target.value = '';
+          }
+        }}
+      />
+
+      {/* Split Modal Dialog */}
+      <SplitDialog
+        isOpen={showSplitDialog}
+        onClose={() => setShowSplitDialog(false)}
+        totalActivePages={activePages.length}
+        selectedActiveIndices={selectedActiveIndices}
+        onExecuteSplit={handleExecuteSplit}
+      />
+
+      {/* Top Application Toolbar */}
       <div
         data-testid="viewer-toolbar"
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '8px',
-          padding: '8px 16px',
+          gap: '6px',
+          padding: '6px 12px',
           backgroundColor: '#ffffff',
-          borderBottom: '1px solid #e0e0e0',
-          boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+          borderBottom: '1px solid #dadce0',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
           zIndex: 10,
           flexWrap: 'wrap',
         }}
@@ -367,6 +489,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           ☰ หน้าตัวอย่าง
         </button>
 
+        {/* Zoom controls */}
         <button onClick={zoomOut} data-testid="zoom-out-btn" title="Zoom Out (-)">
           -
         </button>
@@ -384,7 +507,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         </button>
 
         {/* Undo / Redo controls */}
-        <div style={{ display: 'flex', gap: '4px', marginLeft: '8px', borderLeft: '1px solid #dadce0', paddingLeft: '8px' }}>
+        <div style={{ display: 'flex', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #dadce0', paddingLeft: '6px' }}>
           <button
             onClick={() => pageModel.undo()}
             disabled={!pageModel.canUndo}
@@ -396,7 +519,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               opacity: pageModel.canUndo ? 1 : 0.5,
             }}
           >
-            ↶ ย้อนกลับ (Undo)
+            ↶ ย้อนกลับ
           </button>
           <button
             onClick={() => pageModel.redo()}
@@ -409,17 +532,17 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               opacity: pageModel.canRedo ? 1 : 0.5,
             }}
           >
-            ↷ ทำซ้ำ (Redo)
+            ↷ ทำซ้ำ
           </button>
         </div>
 
         {/* Page Operations Actions */}
-        <div style={{ display: 'flex', gap: '4px', marginLeft: '8px', borderLeft: '1px solid #dadce0', paddingLeft: '8px' }}>
+        <div style={{ display: 'flex', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #dadce0', paddingLeft: '6px' }}>
           <button onClick={() => handleRotate(90)} data-testid="rotate-cw-btn" title="Rotate 90° Clockwise">
-            ↻ หมุนขวา 90°
+            ↻ 90°
           </button>
           <button onClick={() => handleRotate(-90)} data-testid="rotate-ccw-btn" title="Rotate 90° Counter-Clockwise">
-            ↺ หมุนซ้าย 90°
+            ↺ -90°
           </button>
           <button onClick={() => handleRotate(180)} data-testid="rotate-180-btn" title="Rotate 180°">
             180°
@@ -430,13 +553,49 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
             title="Delete Selected Page(s)"
             style={{ color: '#d93025' }}
           >
-            🗑 ลบหน้า
+            🗑 ลบ
           </button>
           <button onClick={handleMoveUp} data-testid="move-up-btn" title="Move Up">
-            ↑ เลื่อนขึ้น
+            ↑ ขึ้น
           </button>
           <button onClick={handleMoveDown} data-testid="move-down-btn" title="Move Down">
-            ↓ เลื่อนลง
+            ↓ ลง
+          </button>
+        </div>
+
+        {/* Merge and Split Actions */}
+        <div style={{ display: 'flex', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #dadce0', paddingLeft: '6px' }}>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            data-testid="merge-file-btn"
+            title="Add PDF Files to Merge"
+            style={{
+              padding: '4px 8px',
+              backgroundColor: '#e8f0fe',
+              color: '#1a73e8',
+              border: '1px solid #c2e7ff',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            ➕ รวมไฟล์ (Merge)
+          </button>
+          <button
+            onClick={() => setShowSplitDialog(true)}
+            data-testid="open-split-btn"
+            title="Split PDF by Ranges, Interval, or Selection"
+            style={{
+              padding: '4px 8px',
+              backgroundColor: '#fef7e0',
+              color: '#b06000',
+              border: '1px solid #fce8b2',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            ✂ แบ่งหน้า (Split)
           </button>
         </div>
 
@@ -465,11 +624,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         <ThumbnailSidebar
           doc={doc}
+          docs={docs}
+          docMetaMap={docMetaMap}
           pageModel={pageModel}
           currentPageId={currentPageId}
           selectedPageIds={selectedPageIds}
           onSelectPage={scrollToPageId}
           onToggleSelect={handleToggleSelect}
+          onRemoveDoc={handleRemoveDoc}
           isOpen={showSidebar}
         />
 
@@ -494,31 +656,34 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               width: '100%',
             }}
           >
-            {visiblePages.map((layout) => (
-              <div
-                key={layout.entry.id}
-                style={{
-                  position: 'absolute',
-                  top: `${layout.top}px`,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                }}
-              >
-                <PageView
-                  doc={doc}
-                  pageEntry={layout.entry}
-                  pageSize={layout.size}
-                  scale={zoom}
-                  dpr={dpr}
-                  generation={generation}
-                  tileCache={tileCache}
-                  viewportTop={bufferTop}
-                  viewportBottom={bufferBottom}
-                  pageTop={layout.top}
-                  onTileRendered={() => setTileRenderCount((c) => c + 1)}
-                />
-              </div>
-            ))}
+            {visiblePages.map((layout) => {
+              const pageDoc = docs.get(layout.entry.sourceDocId) || doc;
+              return (
+                <div
+                  key={layout.entry.id}
+                  style={{
+                    position: 'absolute',
+                    top: `${layout.top}px`,
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                  }}
+                >
+                  <PageView
+                    doc={pageDoc}
+                    pageEntry={layout.entry}
+                    pageSize={layout.size}
+                    scale={zoom}
+                    dpr={dpr}
+                    generation={generation}
+                    tileCache={tileCache}
+                    viewportTop={bufferTop}
+                    viewportBottom={bufferBottom}
+                    pageTop={layout.top}
+                    onTileRendered={() => setTileRenderCount((c) => c + 1)}
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>

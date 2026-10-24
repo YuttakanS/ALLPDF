@@ -6,13 +6,21 @@ export const THUMBNAIL_ITEM_HEIGHT = 170;
 export const THUMBNAIL_WIDTH = 120;
 export const THUMBNAIL_HEIGHT = 140;
 
+export interface DocumentMeta {
+  name: string;
+  pageCount: number;
+}
+
 export interface ThumbnailSidebarProps {
   doc: PdfDocument;
+  docs?: Map<string, PdfDocument>;
+  docMetaMap?: Record<string, DocumentMeta>;
   pageModel: PageListModel;
   currentPageId: string | null;
   selectedPageIds: Set<string>;
   onSelectPage: (pageId: string) => void;
   onToggleSelect: (pageId: string, isShift: boolean, isCtrl: boolean) => void;
+  onRemoveDoc?: (docId: string) => void;
   isOpen?: boolean;
 }
 
@@ -51,7 +59,7 @@ const ThumbnailItem: React.FC<ThumbnailItemProps> = ({
     if (!ctx) return;
 
     let isSubscribed = true;
-    const cacheKey = `${doc.docId}_thumb_${entry.sourcePageIndex}`;
+    const cacheKey = `${entry.sourceDocId}_thumb_${entry.sourcePageIndex}`;
     const cached = thumbnailCache.get(cacheKey);
 
     if (cached) {
@@ -102,7 +110,7 @@ const ThumbnailItem: React.FC<ThumbnailItemProps> = ({
     return () => {
       isSubscribed = false;
     };
-  }, [doc, entry.sourcePageIndex]);
+  }, [doc, entry.sourceDocId, entry.sourcePageIndex]);
 
   return (
     <div
@@ -181,11 +189,14 @@ const ThumbnailItem: React.FC<ThumbnailItemProps> = ({
 
 export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
   doc,
+  docs,
+  docMetaMap,
   pageModel,
   currentPageId,
   selectedPageIds,
   onSelectPage,
   onToggleSelect,
+  onRemoveDoc,
   isOpen = true,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -193,7 +204,10 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
   const [viewportHeight, setViewportHeight] = useState(800);
   const [draggedId, setDraggedId] = useState<string | null>(null);
 
-  const activePages = pageModel.getActivePages();
+  // Filter out active pages of collapsed documents
+  const allActivePages = pageModel.getActivePages();
+  const visibleActivePages = allActivePages.filter((p) => !pageModel.isDocCollapsed(p.sourceDocId));
+  const docIds = pageModel.getDocumentIds();
 
   useEffect(() => {
     const container = containerRef.current;
@@ -231,7 +245,6 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
     const sourceId = draggedId || e.dataTransfer.getData('text/plain');
     if (!sourceId || sourceId === targetId) return;
 
-    // If multiple pages are selected and dragged, move all selected
     const pagesToMove = selectedPageIds.has(sourceId) ? Array.from(selectedPageIds) : [sourceId];
     pageModel.movePages(pagesToMove, targetId, 'before');
     setDraggedId(null);
@@ -239,18 +252,18 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
 
   if (!isOpen) return null;
 
-  const totalHeight = activePages.length * THUMBNAIL_ITEM_HEIGHT;
+  const totalHeight = visibleActivePages.length * THUMBNAIL_ITEM_HEIGHT;
 
   // Virtualization bounds
   const startIndex = Math.max(0, Math.floor(scrollTop / THUMBNAIL_ITEM_HEIGHT) - 2);
   const endIndex = Math.min(
-    activePages.length - 1,
+    visibleActivePages.length - 1,
     Math.ceil((scrollTop + viewportHeight) / THUMBNAIL_ITEM_HEIGHT) + 2
   );
 
   const visibleItems = [];
   for (let i = startIndex; i <= endIndex; i++) {
-    const item = activePages[i];
+    const item = visibleActivePages[i];
     if (item) {
       visibleItems.push({ entry: item, displayIndex: i });
     }
@@ -260,7 +273,7 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
     <aside
       data-testid="thumbnail-sidebar"
       style={{
-        width: '180px',
+        width: '190px',
         height: '100%',
         backgroundColor: '#f8f9fa',
         borderRight: '1px solid #e0e0e0',
@@ -269,22 +282,88 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
         userSelect: 'none',
       }}
     >
+      {/* Document Manager Header */}
       <div
+        data-testid="doc-manager"
         style={{
-          padding: '8px 12px',
+          padding: '8px',
           borderBottom: '1px solid #e0e0e0',
-          fontWeight: 600,
-          fontSize: '0.85rem',
-          color: '#3c4043',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
+          backgroundColor: '#f1f3f4',
+          maxHeight: '140px',
+          overflowY: 'auto',
         }}
       >
-        <span>หน้า ({activePages.length})</span>
-        <span style={{ fontSize: '0.75rem', color: '#70757a' }}>
-          {selectedPageIds.size > 0 ? `เลือก ${selectedPageIds.size}` : ''}
-        </span>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#5f6368', marginBottom: '4px' }}>
+          เอกสารที่เปิดอยู่ ({docIds.length})
+        </div>
+        {docIds.map((dId) => {
+          const meta = docMetaMap?.[dId] || { name: `เอกสาร (${dId.slice(0, 6)})`, pageCount: 0 };
+          const isCollapsed = pageModel.isDocCollapsed(dId);
+          return (
+            <div
+              key={dId}
+              data-testid={`doc-item-${dId}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '4px 6px',
+                marginBottom: '4px',
+                backgroundColor: '#ffffff',
+                borderRadius: '4px',
+                border: '1px solid #dadce0',
+                fontSize: '0.75rem',
+              }}
+            >
+              <span
+                title={meta.name}
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  maxWidth: '100px',
+                  fontWeight: 500,
+                }}
+              >
+                {meta.name}
+              </span>
+              <div style={{ display: 'flex', gap: '2px' }}>
+                <button
+                  data-testid={`collapse-doc-${dId}`}
+                  onClick={() => pageModel.toggleDocCollapse(dId)}
+                  title={isCollapsed ? 'แสดงหน้า' : 'ซ่อนหน้า'}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '2px',
+                    fontSize: '0.7rem',
+                    color: '#5f6368',
+                  }}
+                >
+                  {isCollapsed ? '▶' : '▼'}
+                </button>
+                <button
+                  data-testid={`remove-doc-${dId}`}
+                  onClick={() =>
+                    onRemoveDoc ? onRemoveDoc(dId) : pageModel.removeDocument(dId)
+                  }
+                  title="ลบเอกสารนี้"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: '2px',
+                    fontSize: '0.75rem',
+                    color: '#d93025',
+                  }}
+                >
+                  🗑
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       <div
@@ -299,32 +378,35 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
         }}
       >
         <div style={{ height: `${totalHeight}px`, position: 'relative', width: '100%' }}>
-          {visibleItems.map(({ entry, displayIndex }) => (
-            <div
-              key={entry.id}
-              style={{
-                position: 'absolute',
-                top: `${displayIndex * THUMBNAIL_ITEM_HEIGHT}px`,
-                left: 0,
-                right: 0,
-              }}
-            >
-              <ThumbnailItem
-                doc={doc}
-                entry={entry}
-                displayIndex={displayIndex}
-                isActive={entry.id === currentPageId}
-                isSelected={selectedPageIds.has(entry.id)}
-                onClick={(e) => {
-                  onToggleSelect(entry.id, e.shiftKey, e.ctrlKey || e.metaKey);
-                  onSelectPage(entry.id);
+          {visibleItems.map(({ entry, displayIndex }) => {
+            const itemDoc = (docs && docs.get(entry.sourceDocId)) || doc;
+            return (
+              <div
+                key={entry.id}
+                style={{
+                  position: 'absolute',
+                  top: `${displayIndex * THUMBNAIL_ITEM_HEIGHT}px`,
+                  left: 0,
+                  right: 0,
                 }}
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-              />
-            </div>
-          ))}
+              >
+                <ThumbnailItem
+                  doc={itemDoc}
+                  entry={entry}
+                  displayIndex={displayIndex}
+                  isActive={entry.id === currentPageId}
+                  isSelected={selectedPageIds.has(entry.id)}
+                  onClick={(e) => {
+                    onToggleSelect(entry.id, e.shiftKey, e.ctrlKey || e.metaKey);
+                    onSelectPage(entry.id);
+                  }}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onDrop={handleDrop}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
     </aside>

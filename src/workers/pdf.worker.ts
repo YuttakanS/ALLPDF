@@ -9,6 +9,8 @@ import {
 import type {
   DocClosePayload,
   DocCloseResult,
+  DocExportPagesPayload,
+  DocExportPagesResult,
   DocOpenPayload,
   DocOpenResult,
   DocPageSizePayload,
@@ -255,6 +257,44 @@ export async function processWorkerRequest(
             transfers: [rawBuffer],
           };
         }
+      }
+
+      case 'DOC_EXPORT_PAGES': {
+        const payload = request.payload as DocExportPagesPayload;
+        const dstDoc = new mupdf.PDFDocument();
+
+        for (let i = 0; i < payload.pages.length; i++) {
+          const pageSpec = payload.pages[i];
+          if (!pageSpec) continue;
+          const srcDoc = activeDocs.get(pageSpec.sourceDocId);
+          if (!srcDoc) {
+            throw new CorruptFileError(`Document ${pageSpec.sourceDocId} is not loaded or has been closed.`);
+          }
+
+          dstDoc.graftPage(-1, srcDoc, pageSpec.sourcePageIndex);
+
+          if (pageSpec.rotationDelta !== 0) {
+            const page = dstDoc.loadPage(dstDoc.countPages() - 1);
+            const pageObj = page.getObject();
+            const currentRotate = pageObj.get('Rotate')?.valueOf() ?? 0;
+            const effectiveRotate =
+              ((Number(currentRotate) + pageSpec.rotationDelta) % 360 + 360) % 360;
+            pageObj.put('Rotate', dstDoc.newInteger(effectiveRotate));
+          }
+        }
+
+        const savedBuf = dstDoc.saveToBuffer('');
+        const outArray = savedBuf.asUint8Array().slice();
+        const outBuffer = outArray.buffer;
+
+        const result: DocExportPagesResult = {
+          buffer: outBuffer,
+        };
+
+        return {
+          reply: { id, action, success: true, result },
+          transfers: [outBuffer],
+        };
       }
 
       case 'DOC_CLOSE': {

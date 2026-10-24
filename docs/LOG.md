@@ -194,3 +194,40 @@
 
 ### Open Questions
 - None.
+
+## Phase 1.5: Merge and Split (`branch: phase-1`)
+
+### What Was Done
+- **Multi-Document PDF Engine & Worker Protocol (`src/engine/`, `src/workers/`)**:
+  - Enhanced worker protocol with `DOC_EXPORT_PAGES` action for off-thread page grafting across multiple documents.
+  - Native MuPDF page grafting (`dstDoc.graftPage(-1, srcDoc, pageIndex)`) preserving mixed page sizes and rotation deltas.
+  - Shared `WorkerClient` session allowing documents in the same context to merge and export without thread serialization overhead.
+- **Merge Features (`src/app/viewer/`, `src/engine/page-model/`)**:
+  - File picker (`➕ รวมไฟล์ (Merge)`) and drag-and-drop file ingestion into `PageListModel`.
+  - Each file retains its distinct `sourceDocId`.
+  - Document manager in sidebar showing active open documents, per-file collapse/expand toggles, and per-file removal commands with undo/redo support.
+- **Split Pipeline & Validation (`src/engine/split/`)**:
+  - Range parsing and validation (`parsePageRanges`): handles ranges (`1-3`), open-start (`-4`), open-end (`8-`), and single pages (`5`).
+  - Strict validation: out-of-bounds page numbers and inverted ranges (`start > end`) are strictly rejected with bilingual Thai/English error feedback—never clamped silently.
+  - Split by interval (`splitEveryNPages`) and split by selection (`splitSelectedPages`).
+  - Split execution (`executeSplit`): single output yields a `.pdf`; multi-group output is bundled into a single `.zip` archive via `fflate`.
+  - UI modal dialog [`SplitDialog.tsx`](file:///D:/_Projects/ALLPDF/src/app/viewer/SplitDialog.tsx) with live bilingual validation feedback and download triggers.
+- **Unit & E2E Tests**:
+  - Unit tests in [`tests/unit/merge-split.test.ts`](file:///D:/_Projects/ALLPDF/tests/unit/merge-split.test.ts) (12 tests): verified bilingual error messages, range parsing, interval splitting, selection splitting, multi-doc merging order, per-file remove/undo, multi-doc export with mixed orientations, and `.zip` bundle integrity via `fflate.unzipSync`.
+  - E2E acceptance test in [`tests/e2e/merge-split.spec.ts`](file:///D:/_Projects/ALLPDF/tests/e2e/merge-split.spec.ts): verified merging A(3p) + B(5p) -> 8 pages, thumbnail virtualization, per-file collapse and remove with undo, out-of-bounds rejection in UI, and `.zip` archive download.
+
+### Test Verification Results
+- `pnpm check`:
+  - ESLint: 0 errors, 0 warnings.
+  - Typecheck: 0 errors.
+  - Vitest: 7 test files, 34 tests passed (720ms).
+- `pnpm build`:
+  - Production bundle & PWA service worker built cleanly (1.07s).
+- `pnpm test:e2e`:
+  - 5 passed (3.5s) on Chromium (`smoke.spec.ts`, `viewer.spec.ts`, `thumbnails.spec.ts`, `page-operations.spec.ts`, `merge-split.spec.ts`).
+
+### Dependencies Added
+- `fflate`: Fast, lightweight, zero-dependency browser and Node compression library used for client-side `.zip` packaging of multi-file split outputs.
+
+### Open Questions
+- None.

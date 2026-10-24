@@ -20,6 +20,7 @@
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "mupdf": "^1.28.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
