@@ -231,3 +231,43 @@
 
 ### Open Questions
 - None.
+
+## Phase 1.6: Export / Save and Round-Trip Verification (`branch: phase-1`)
+
+### What Was Done
+- **Worker PDF Assembly & Metadata Preservation (`src/workers/pdf.worker.ts`, `src/engine/export/`)**:
+  - Grafts page trees and rotation deltas into a clean output document.
+  - Preserves document `/Info` dictionary (Title, Author, Subject, etc.) from primary source document, supporting full Unicode/Thai strings.
+  - Outline loss detection: inspects source documents and emits structured warnings (`OUTLINES_DROPPED`) when bookmarks/outlines cannot be safely preserved across merged/reordered pages.
+- **Filename Normalization & Sanitization (`src/engine/export/filename.ts`)**:
+  - Enforces Unicode NFC normalization so Thai character combinations, vowels, and tone marks survive intact.
+  - Sanitizes only invalid Windows and POSIX filename characters (`[<>:"/\\|?*\x00-\x1F]`), leaving Thai text and spaces intact.
+- **Save As & Download Fallback (`src/engine/export/download.ts`)**:
+  - Uses the File System Access API (`showSaveFilePicker`) when available for native browser "Save As" file dialogs.
+  - Seamless fallback to Blob + object URL download anchor.
+- **Public Test Corpus (`test-corpus/public/thai_embedded_sample.pdf`)**:
+  - Generated valid synthetic corpus PDF containing embedded TrueType font (Tahoma), mixed page dimensions (612x792 portrait, 792x612 landscape), page rotation, and Thai metadata.
+- **Mandatory Round-Trip Acceptance Tests**:
+  - Unit tests in [`tests/unit/export-roundtrip.test.ts`](file:///D:/_Projects/ALLPDF/tests/unit/export-roundtrip.test.ts):
+    - Exported PDF reopened with our own engine (`PdfDocument.open`): page count, dimensions, and rotation deltas match.
+    - Exported PDF reopened with `pdf.js` (`pdfjs-dist`): verified `doc.numPages`, metadata Title/Author (`เอกสารทดสอบภาษาไทย`), page dimensions, and page rotation.
+    - Pixel-diff verification: compared rasterized baseline pixels against exported page with rotation applied. Measured pixel diff: **0.0000%** (0 different bytes), well within stated tolerance (< 0.05%).
+  - E2E acceptance tests in [`tests/e2e/export-save.spec.ts`](file:///D:/_Projects/ALLPDF/tests/e2e/export-save.spec.ts):
+    - Verified modified document export, Thai filename survival (`เอกสาร_ส่งออก.pdf`), download interception, and round-trip verification through `pdf.js`.
+    - Verified File System Access API `showSaveFilePicker` integration when available.
+
+### Test Verification Results
+- `pnpm check`:
+  - ESLint: 0 errors, 0 warnings.
+  - Typecheck: 0 errors.
+  - Vitest: 8 test files, 38 tests passed (658ms).
+- `pnpm build`:
+  - Production bundle & PWA service worker built cleanly (885ms).
+- `pnpm test:e2e`:
+  - 7 passed (3.4s) on Chromium across 6 test suites.
+
+### Dependencies Added
+- `pdfjs-dist` (devDependencies only): Standard PDF reference implementation used exclusively in unit and E2E round-trip acceptance tests to verify that exported PDFs conform to the PDF specification and render identically across engines.
+
+### Open Questions
+- None.

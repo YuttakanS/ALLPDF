@@ -98,8 +98,15 @@ export interface DocExportPagesPayload {
   pages: PageExportSpec[];
 }
 
+export interface ExportWarning {
+  code: 'OUTLINES_DROPPED' | 'METADATA_MERGED' | 'LINKS_DROPPED';
+  messageEn: string;
+  messageTh: string;
+}
+
 export interface DocExportPagesResult {
   buffer: ArrayBuffer;
+  warnings?: ExportWarning[];
 }
 
 export interface WorkerRequestEnvelope<T = unknown> {

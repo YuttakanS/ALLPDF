@@ -8,7 +8,8 @@ import React, {
 import type { PdfDocument } from '../../engine';
 import { PageListModel } from '../../engine/page-model';
 import { executeSplit, downloadFile, type SplitGroup } from '../../engine/split';
-import type { PageSize } from '../../shared/protocol';
+import { saveOrDownloadPdf } from '../../engine/export';
+import type { ExportWarning, PageExportSpec, PageSize } from '../../shared/protocol';
 import {
   DEFAULT_ZOOM,
   FIT_PAGE_MARGIN,
@@ -53,6 +54,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [tileRenderCount, setTileRenderCount] = useState<number>(0);
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
   const [showSplitDialog, setShowSplitDialog] = useState<boolean>(false);
+  const [exportWarnings, setExportWarnings] = useState<ExportWarning[] | null>(null);
 
   // Non-destructive page list model & command manager
   const [pageModel] = useState<PageListModel>(
@@ -355,6 +357,29 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     [doc.client, pageModel]
   );
 
+  const handleExport = useCallback(async () => {
+    const active = pageModel.getActivePages();
+    if (active.length === 0) return;
+
+    const specs: PageExportSpec[] = active.map((p) => ({
+      sourceDocId: p.sourceDocId,
+      sourcePageIndex: p.sourcePageIndex,
+      rotationDelta: p.rotationDelta,
+    }));
+
+    try {
+      const result = await doc.client.exportPages(specs);
+      if (result.warnings && result.warnings.length > 0) {
+        setExportWarnings(result.warnings);
+      } else {
+        setExportWarnings(null);
+      }
+      await saveOrDownloadPdf(result.buffer, 'เอกสาร_ส่งออก.pdf');
+    } catch (err) {
+      console.error('Failed to export PDF:', err);
+    }
+  }, [doc.client, pageModel]);
+
   const selectedActiveIndices = useMemo(() => {
     const active = pageModel.getActivePages();
     const indices: number[] = [];
@@ -597,6 +622,22 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           >
             ✂ แบ่งหน้า (Split)
           </button>
+          <button
+            onClick={handleExport}
+            data-testid="export-pdf-btn"
+            title="Export Output PDF"
+            style={{
+              padding: '4px 8px',
+              backgroundColor: '#188038',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            💾 ส่งออก (Export)
+          </button>
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -619,6 +660,41 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Export Warnings Banner */}
+      {exportWarnings && (
+        <div
+          data-testid="export-warnings-banner"
+          style={{
+            backgroundColor: '#fef7e0',
+            borderBottom: '1px solid #fce8b2',
+            color: '#b06000',
+            padding: '6px 16px',
+            fontSize: '0.8rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            zIndex: 9,
+          }}
+        >
+          <span>
+            ⚠️ ข้อควรระวัง:{' '}
+            {exportWarnings.map((w) => `${w.messageTh} (${w.messageEn})`).join(' | ')}
+          </span>
+          <button
+            onClick={() => setExportWarnings(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: '#b06000',
+              fontWeight: 600,
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* Main Body: Sidebar + Virtualized Page Viewport */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>

@@ -218,7 +218,8 @@ describe('Sub-task 1.5: Merge and Split Unit Tests', () => {
         specs.push({ sourceDocId: docB.docId, sourcePageIndex: i, rotationDelta: 90 });
       }
 
-      const exportedBuffer = await docA.exportPages(specs);
+      const exportRes = await docA.exportPages(specs);
+      const exportedBuffer = exportRes.buffer;
       expect(exportedBuffer.byteLength).toBeGreaterThan(0);
 
       // Verify exported document using MuPDF directly

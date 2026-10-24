@@ -120,7 +120,7 @@ export class PdfDocument {
   /**
    * Builds an output PDF containing the specified page references across open documents.
    */
-  async exportPages(pages: PageExportSpec[]): Promise<ArrayBuffer> {
+  async exportPages(pages: PageExportSpec[]): Promise<import('../shared/protocol').DocExportPagesResult> {
     if (this._isClosed) {
       throw new Error(`Cannot export pages: document ${this._docId} has been closed.`);
     }

@@ -138,12 +138,13 @@ export class WorkerClient {
     return this.send('DOC_CLOSE', { docId });
   }
 
-  async exportPages(pages: import('../shared/protocol').PageExportSpec[]): Promise<ArrayBuffer> {
-    const res = await this.send<
+  async exportPages(
+    pages: import('../shared/protocol').PageExportSpec[]
+  ): Promise<import('../shared/protocol').DocExportPagesResult> {
+    return this.send<
       import('../shared/protocol').DocExportPagesPayload,
       import('../shared/protocol').DocExportPagesResult
     >('DOC_EXPORT_PAGES', { pages });
-    return res.buffer;
   }
 
   terminate(): void {

@@ -17,7 +17,7 @@ export interface SplitOutput {
 export async function executeSplit(
   activePages: PageEntry[],
   groups: SplitGroup[],
-  exportFn: (specs: PageExportSpec[]) => Promise<ArrayBuffer>,
+  exportFn: (specs: PageExportSpec[]) => Promise<ArrayBuffer | { buffer: ArrayBuffer }>,
   baseName = 'split_document'
 ): Promise<SplitOutput> {
   if (groups.length === 0) {
@@ -38,7 +38,8 @@ export async function executeSplit(
       };
     });
 
-    const buffer = await exportFn(specs);
+    const res = await exportFn(specs);
+    const buffer = 'buffer' in res ? res.buffer : res;
     return {
       type: 'pdf',
       filename: group.name,
@@ -62,7 +63,8 @@ export async function executeSplit(
       };
     });
 
-    const buffer = await exportFn(specs);
+    const res = await exportFn(specs);
+    const buffer = 'buffer' in res ? res.buffer : res;
     zipFiles[group.name] = new Uint8Array(buffer);
   }
 

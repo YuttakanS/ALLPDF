@@ -262,13 +262,48 @@ export async function processWorkerRequest(
       case 'DOC_EXPORT_PAGES': {
         const payload = request.payload as DocExportPagesPayload;
         const dstDoc = new mupdf.PDFDocument();
+        const warnings: import('../shared/protocol').ExportWarning[] = [];
+        const inspectedDocIds = new Set<string>();
 
+        // 1. Preserve document metadata (/Info) from the primary document
+        if (payload.pages.length > 0 && payload.pages[0]) {
+          const primaryDoc = activeDocs.get(payload.pages[0].sourceDocId);
+          if (primaryDoc) {
+            try {
+              const origInfo = primaryDoc.getTrailer().get('Info');
+              if (origInfo && !origInfo.isNull()) {
+                const graftedInfo = dstDoc.graftObject(origInfo);
+                dstDoc.getTrailer().put('Info', graftedInfo);
+              }
+            } catch {
+              // Ignore metadata graft failure if structure is non-standard
+            }
+          }
+        }
+
+        // 2. Graft each page and apply rotation deltas
         for (let i = 0; i < payload.pages.length; i++) {
           const pageSpec = payload.pages[i];
           if (!pageSpec) continue;
           const srcDoc = activeDocs.get(pageSpec.sourceDocId);
           if (!srcDoc) {
             throw new CorruptFileError(`Document ${pageSpec.sourceDocId} is not loaded or has been closed.`);
+          }
+
+          // Check for dropped outlines
+          if (!inspectedDocIds.has(pageSpec.sourceDocId)) {
+            inspectedDocIds.add(pageSpec.sourceDocId);
+            try {
+              if (srcDoc.loadOutline()) {
+                warnings.push({
+                  code: 'OUTLINES_DROPPED',
+                  messageEn: `Bookmarks/outlines from document ${pageSpec.sourceDocId} were dropped during export`,
+                  messageTh: `โครงร่างเอกสาร (Bookmarks) จากเอกสาร ${pageSpec.sourceDocId} ถูกตัดออกในการส่งออก`,
+                });
+              }
+            } catch {
+              // ignore
+            }
           }
 
           dstDoc.graftPage(-1, srcDoc, pageSpec.sourcePageIndex);
@@ -289,6 +324,7 @@ export async function processWorkerRequest(
 
         const result: DocExportPagesResult = {
           buffer: outBuffer,
+          warnings: warnings.length > 0 ? warnings : undefined,
         };
 
         return {
