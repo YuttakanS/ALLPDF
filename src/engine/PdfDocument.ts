@@ -64,6 +64,21 @@ export class PdfDocument {
   }
 
   /**
+   * Renders a fixed-size tile off-thread, returning an ImageBitmap (transferred).
+   */
+  async renderTile(
+    payload: Omit<import('../shared/protocol').PageRenderTilePayload, 'docId'>
+  ): Promise<import('../shared/protocol').PageRenderTileResult> {
+    if (this._isClosed) {
+      throw new Error(`Cannot render tile: document ${this._docId} has been closed.`);
+    }
+    return this._client.renderTile({
+      ...payload,
+      docId: this._docId,
+    });
+  }
+
+  /**
    * Closes the document, releases worker handles and memory, and terminates the worker session.
    */
   async close(): Promise<void> {

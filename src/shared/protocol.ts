@@ -9,7 +9,7 @@ export interface PageSize {
   rotate: number;
 }
 
-export type WorkerAction = 'DOC_OPEN' | 'DOC_PAGE_SIZE' | 'DOC_CLOSE';
+export type WorkerAction = 'DOC_OPEN' | 'DOC_PAGE_SIZE' | 'DOC_CLOSE' | 'PAGE_RENDER_TILE';
 
 export interface DocOpenPayload {
   docId: string;
@@ -41,6 +41,30 @@ export interface DocClosePayload {
 export interface DocCloseResult {
   docId: string;
   closed: boolean;
+}
+
+export interface PageRenderTilePayload {
+  docId: string;
+  pageIndex: number;
+  tileX: number; // in points
+  tileY: number; // in points
+  tileW: number; // in pixels
+  tileH: number; // in pixels
+  scale: number; // zoom * dpr
+  generation: number;
+}
+
+export interface PageRenderTileResult {
+  docId: string;
+  pageIndex: number;
+  tileX: number;
+  tileY: number;
+  tileW: number;
+  tileH: number;
+  scale: number;
+  generation: number;
+  bitmap?: ImageBitmap;
+  rawBuffer?: ArrayBuffer;
 }
 
 export interface WorkerRequestEnvelope<T = unknown> {

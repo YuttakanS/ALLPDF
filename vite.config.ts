@@ -46,6 +46,9 @@ export default defineConfig({
       'Cross-Origin-Embedder-Policy': 'require-corp',
     },
   },
+  build: {
+    target: 'es2022',
+  },
   worker: {
     format: 'es',
   },

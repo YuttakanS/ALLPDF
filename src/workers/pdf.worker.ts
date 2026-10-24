@@ -1,4 +1,4 @@
-import * as mupdf from 'mupdf';
+import type * as MuPdfType from 'mupdf';
 import {
   CorruptFileError,
   EncryptedNeedsPasswordError,
@@ -13,12 +13,23 @@ import type {
   DocOpenResult,
   DocPageSizePayload,
   DocPageSizeResult,
+  PageRenderTilePayload,
+  PageRenderTileResult,
   WorkerRequestEnvelope,
   WorkerResponseEnvelope,
 } from '../shared/protocol';
 
+let mupdfInstance: typeof MuPdfType | null = null;
+
+async function getMuPdf(): Promise<typeof MuPdfType> {
+  if (!mupdfInstance) {
+    mupdfInstance = await import('mupdf');
+  }
+  return mupdfInstance;
+}
+
 const DEFAULT_MAX_BYTES = 200 * 1024 * 1024; // 200 MB
-const activeDocs = new Map<string, mupdf.PDFDocument>();
+const activeDocs = new Map<string, MuPdfType.PDFDocument>();
 
 export function getActiveDocCount(): number {
   return activeDocs.size;
@@ -30,6 +41,8 @@ export async function processWorkerRequest(
   const { id, action } = request;
 
   try {
+    const mupdf = await getMuPdf();
+
     switch (action) {
       case 'DOC_OPEN': {
         const payload = request.payload as DocOpenPayload;
@@ -43,7 +56,7 @@ export async function processWorkerRequest(
           throw new CorruptFileError('File size is too small to contain a valid PDF structure.');
         }
 
-        let doc: mupdf.PDFDocument;
+        let doc: MuPdfType.PDFDocument;
         try {
           doc = new mupdf.PDFDocument(payload.buffer);
         } catch (err: unknown) {
@@ -81,7 +94,9 @@ export async function processWorkerRequest(
         }
 
         if (payload.pageIndex < 0 || payload.pageIndex >= doc.countPages()) {
-          throw new Error(`Page index ${payload.pageIndex} out of bounds (0..${doc.countPages() - 1}).`);
+          throw new Error(
+            `Page index ${payload.pageIndex} out of bounds (0..${doc.countPages() - 1}).`
+          );
         }
 
         const page = doc.loadPage(payload.pageIndex);
@@ -110,11 +125,82 @@ export async function processWorkerRequest(
         };
       }
 
+      case 'PAGE_RENDER_TILE': {
+        const payload = request.payload as PageRenderTilePayload;
+        const doc = activeDocs.get(payload.docId);
+        if (!doc) {
+          throw new CorruptFileError(`Document ${payload.docId} is not loaded or has been closed.`);
+        }
+
+        const page = doc.loadPage(payload.pageIndex);
+        const { tileX, tileY, tileW, tileH, scale, generation } = payload;
+
+        // Compose matrix mapping page coordinates to tile boundaries
+        const ctm = mupdf.Matrix.concat(
+          mupdf.Matrix.scale(scale, scale),
+          mupdf.Matrix.translate(-tileX * scale, -tileY * scale)
+        );
+
+        const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, tileW, tileH], true);
+        pixmap.clear(255); // default background: opaque white
+
+        const dev = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap);
+        page.run(dev, ctm);
+        dev.close();
+
+        const pixels = pixmap.getPixels();
+
+        // Browser context: create ImageBitmap for zero-copy Transferable delivery
+        if (typeof createImageBitmap === 'function' && typeof ImageData === 'function') {
+          const imgData = new ImageData(
+            new Uint8ClampedArray(pixels.buffer as ArrayBuffer, pixels.byteOffset, pixels.byteLength),
+            tileW,
+            tileH
+          );
+          const bitmap = await createImageBitmap(imgData);
+          const result: PageRenderTileResult = {
+            docId: payload.docId,
+            pageIndex: payload.pageIndex,
+            tileX,
+            tileY,
+            tileW,
+            tileH,
+            scale,
+            generation,
+            bitmap,
+          };
+          return {
+            reply: { id, action, success: true, result },
+            transfers: [bitmap],
+          };
+        } else {
+          // Node/headless test fallback: transfer raw byte buffer
+          const rawBuffer = (pixels.buffer as ArrayBuffer).slice(
+            pixels.byteOffset,
+            pixels.byteOffset + pixels.byteLength
+          );
+          const result: PageRenderTileResult = {
+            docId: payload.docId,
+            pageIndex: payload.pageIndex,
+            tileX,
+            tileY,
+            tileW,
+            tileH,
+            scale,
+            generation,
+            rawBuffer,
+          };
+          return {
+            reply: { id, action, success: true, result },
+            transfers: [rawBuffer],
+          };
+        }
+      }
+
       case 'DOC_CLOSE': {
         const payload = request.payload as DocClosePayload;
         activeDocs.delete(payload.docId);
 
-        // Instruct MuPDF WASM to clean up its cache store
         try {
           mupdf.emptyStore();
         } catch {
@@ -146,14 +232,14 @@ export async function processWorkerRequest(
   }
 }
 
-// In standard Web Worker context, wire onmessage handler
-if (typeof self !== 'undefined' && 'postMessage' in self && typeof WorkerGlobalScope !== 'undefined') {
-  self.onmessage = async (event: MessageEvent<WorkerRequestEnvelope>) => {
+// In standard Web Worker context, wire onmessage listener synchronously
+if (typeof self !== 'undefined' && 'addEventListener' in self) {
+  self.addEventListener('message', async (event: MessageEvent<WorkerRequestEnvelope>) => {
     const { reply, transfers } = await processWorkerRequest(event.data);
     if (transfers && transfers.length > 0) {
       self.postMessage(reply, transfers);
     } else {
       self.postMessage(reply);
     }
-  };
+  });
 }

@@ -88,3 +88,39 @@
 ### Open Questions
 - None.
 
+## Phase 1.2: Tile Renderer + Viewer (`branch: phase-1`)
+
+### What Was Done
+- **Tile Size Benchmark & ADR**: Evaluated 256×256 vs 512×512 tiles in MuPDF WASM (0.12ms vs 0.21ms per tile). Selected 256×256 px to guarantee tiles fit inside CPU L2 cache (256 KB per RGBA tile) and to provide fine-grained LRU eviction. Recorded in `docs/ADR-001-TILE-SIZE.md`.
+- **LRU Tile Cache (`src/app/viewer/tile-cache.ts`)**: Implemented byte-bounded LRU cache with a default 128 MB budget (tracks `width * height * 4`). Evicted `ImageBitmap`s are immediately closed via `bitmap.close()`. Unit tested in `tests/unit/tile-cache.test.ts`.
+- **Tile Rendering Protocol (`src/shared/protocol.ts`, `src/workers/pdf.worker.ts`)**: Added `PAGE_RENDER_TILE` action to worker. Renders tile with `mupdf.DrawDevice` and Compose matrix, transfers `ImageBitmap` zero-copy to main thread.
+- **Virtualized Vertical Viewer (`src/app/viewer/`)**:
+  - Implemented `PdfViewer` and `PageView` with viewport intersection culling (+ 1 viewport margin buffer).
+  - Implemented generation token cancellation on scroll/zoom.
+  - Canvas draws tiles via `drawImage(bitmap, dx, dy)` with zero main-thread `getImageData` calls.
+  - Zoom controls: Fit-Width, Fit-Page, 25%–400%, keyboard shortcuts (`+`, `-`, `Ctrl+0`), and pinch/wheel zoom with `ctrlKey`.
+  - Page number input and smooth scrolling.
+- **E2E Acceptance Test (`tests/e2e/viewer.spec.ts`)**:
+  - Opened 100-page synthetic PDF.
+  - First page visible quickly (< 2000ms).
+  - Virtualization confirmed: live page containers in DOM remained capped at <= 8 pages throughout continuous vertical scrolling to page 100.
+  - Long Tasks API monitored: 0 long tasks over 50 ms attributable to application code during scrolling.
+  - Zoom in/out and Fit Width verified.
+
+### Test Verification Results
+- `pnpm check`:
+  - ESLint: 0 errors, 0 warnings.
+  - Typecheck: 0 errors.
+  - Vitest: 5 test files, 15 tests passed (577ms).
+- `pnpm build`:
+  - Production bundle & PWA service worker built cleanly (1.02s).
+- `pnpm test:e2e`:
+  - 2 passed (2.7s) on Chromium (`smoke.spec.ts` and `viewer.spec.ts`).
+
+### Dependencies Added
+- None (leveraged existing dependencies).
+
+### Open Questions
+- None.
+
+

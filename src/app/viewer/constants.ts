@@ -1,0 +1,7 @@
+export const TILE_SIZE = 256; // Fixed tile dimension in pixels (ADR-001)
+export const MIN_ZOOM = 0.25; // 25%
+export const MAX_ZOOM = 4.0; // 400%
+export const DEFAULT_ZOOM = 1.0;
+export const ZOOM_STEP = 0.15;
+export const PAGE_GAP = 16; // CSS px between pages in vertical scroll
+export const VIEWPORT_MARGIN = 1.0; // 1-viewport buffer above and below visible area

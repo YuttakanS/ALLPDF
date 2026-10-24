@@ -27,6 +27,7 @@ export class WorkerClient {
   private messageCounter = 0;
 
   constructor(transport?: IWorkerTransport) {
+    let workerInstance: Worker | null = null;
     if (transport) {
       this.transport = transport;
     } else {
@@ -34,12 +35,23 @@ export class WorkerClient {
       const worker = new Worker(new URL('../workers/pdf.worker.ts', import.meta.url), {
         type: 'module',
       });
+      workerInstance = worker;
       this.transport = worker as unknown as IWorkerTransport;
     }
 
     this.transport.onmessage = (event: MessageEvent<WorkerResponseEnvelope>) => {
       this.handleMessage(event.data);
     };
+
+    if (workerInstance) {
+      workerInstance.onerror = (e) => {
+        console.error('[WORKER ONERROR]:', e.message, e);
+        for (const [id, req] of this.pendingRequests.entries()) {
+          req.reject(new Error(`Worker execution failed: ${e.message}`));
+          this.pendingRequests.delete(id);
+        }
+      };
+    }
   }
 
   private handleMessage(response: WorkerResponseEnvelope): void {
@@ -108,6 +120,10 @@ export class WorkerClient {
       DocPageSizeResult
     >('DOC_PAGE_SIZE', { docId, pageIndex });
     return res.size;
+  }
+
+  async renderTile(payload: import('../shared/protocol').PageRenderTilePayload): Promise<import('../shared/protocol').PageRenderTileResult> {
+    return this.send('PAGE_RENDER_TILE', payload);
   }
 
   async closeDoc(docId: string): Promise<DocCloseResult> {
