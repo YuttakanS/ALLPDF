@@ -1,12 +1,13 @@
 import React, { useEffect, useRef } from 'react';
 import type { PdfDocument } from '../../engine';
+import type { PageEntry } from '../../engine/page-model';
 import type { PageSize } from '../../shared/protocol';
 import { TILE_SIZE } from './constants';
 import type { TileCache } from './tile-cache';
 
 export interface PageViewProps {
   doc: PdfDocument;
-  pageIndex: number;
+  pageEntry: PageEntry;
   pageSize: PageSize;
   scale: number;
   dpr: number;
@@ -20,7 +21,7 @@ export interface PageViewProps {
 
 export const PageView: React.FC<PageViewProps> = ({
   doc,
-  pageIndex,
+  pageEntry,
   pageSize,
   scale,
   dpr,
@@ -33,11 +34,15 @@ export const PageView: React.FC<PageViewProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const scaledW = Math.round(pageSize.width * scale);
-  const scaledH = Math.round(pageSize.height * scale);
+  const isRotatedQuarter = pageEntry.rotationDelta === 90 || pageEntry.rotationDelta === 270;
+  const baseW = Math.round(pageSize.width * scale);
+  const baseH = Math.round(pageSize.height * scale);
 
-  const canvasW = Math.round(scaledW * dpr);
-  const canvasH = Math.round(scaledH * dpr);
+  const containerW = isRotatedQuarter ? baseH : baseW;
+  const containerH = isRotatedQuarter ? baseW : baseH;
+
+  const canvasW = Math.round(baseW * dpr);
+  const canvasH = Math.round(baseH * dpr);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -72,7 +77,7 @@ export const PageView: React.FC<PageViewProps> = ({
           continue;
         }
 
-        const cacheKey = `${doc.docId}_p${pageIndex}_c${c}_r${r}_s${effectiveScale.toFixed(2)}`;
+        const cacheKey = `${doc.docId}_p${pageEntry.sourcePageIndex}_c${c}_r${r}_s${effectiveScale.toFixed(2)}`;
         const cached = tileCache.get(cacheKey);
 
         if (cached) {
@@ -84,7 +89,7 @@ export const PageView: React.FC<PageViewProps> = ({
 
           doc
             .renderTile({
-              pageIndex,
+              pageIndex: pageEntry.sourcePageIndex,
               tileX,
               tileY,
               tileW: curTileW,
@@ -94,7 +99,6 @@ export const PageView: React.FC<PageViewProps> = ({
             })
             .then((res) => {
               if (!isSubscribed || res.generation !== generation) {
-                // Ignore stale render response (superseded by scroll/zoom)
                 if (res.bitmap) res.bitmap.close();
                 return;
               }
@@ -106,7 +110,7 @@ export const PageView: React.FC<PageViewProps> = ({
               }
             })
             .catch(() => {
-              // Ignore cancelled or aborted render requests
+              // Ignore aborted renders
             });
         }
       }
@@ -117,7 +121,7 @@ export const PageView: React.FC<PageViewProps> = ({
     };
   }, [
     doc,
-    pageIndex,
+    pageEntry.sourcePageIndex,
     canvasW,
     canvasH,
     scale,
@@ -133,14 +137,20 @@ export const PageView: React.FC<PageViewProps> = ({
   return (
     <div
       data-testid="page-container"
-      data-page-index={pageIndex}
+      data-page-index={pageEntry.sourcePageIndex}
+      data-page-id={pageEntry.id}
+      data-rotation={pageEntry.rotationDelta}
       style={{
-        width: `${scaledW}px`,
-        height: `${scaledH}px`,
+        width: `${containerW}px`,
+        height: `${containerH}px`,
         marginBottom: '16px',
         backgroundColor: '#ffffff',
         boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
         position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        overflow: 'hidden',
       }}
     >
       <canvas
@@ -148,9 +158,12 @@ export const PageView: React.FC<PageViewProps> = ({
         width={canvasW}
         height={canvasH}
         style={{
-          width: `${scaledW}px`,
-          height: `${scaledH}px`,
+          width: `${baseW}px`,
+          height: `${baseH}px`,
           display: 'block',
+          transform: pageEntry.rotationDelta ? `rotate(${pageEntry.rotationDelta}deg)` : undefined,
+          transformOrigin: 'center center',
+          transition: 'transform 0.2s ease',
         }}
       />
     </div>

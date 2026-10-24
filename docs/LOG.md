@@ -156,3 +156,41 @@
 
 ### Open Questions
 - None.
+
+## Phase 1.4: Page Model & Operations (`branch: phase-1`)
+
+### What Was Done
+- **Non-Destructive Page Model (`src/engine/page-model/`)**:
+  - Implemented `PageListModel` managing an ordered flat array of `PageEntry`: `{ id, sourceDocId, sourcePageIndex, rotationDelta, deleted }`. Source PDF byte buffers remain immutable until export.
+  - Implemented `CommandManager` adhering to the Command Pattern for undo/redo with configurable history limit (default 100).
+  - Concrete commands: `RotatePagesCommand` (supports 90° CW, -90° CCW, 180°), `DeletePagesCommand`, `RestorePagesCommand`, `MovePagesCommand` (before/after reordering), `MovePagesRelativeCommand` (up/down).
+  - Multi-page operation support: `extractSelection`, `selectAll`, `clearSelection`, range-based shift-selection, and toggle ctrl/cmd-selection.
+- **UI Integration in Viewer & Sidebar**:
+  - `PageView.tsx`: Dynamic layout bounds considering 90°/270° orientation swaps, CSS transforms for immediate rotation responsiveness.
+  - `ThumbnailSidebar.tsx`: Multi-selection visual cues (checkbox, background tint, active/selected highlight borders), HTML5 drag-and-drop reordering with live model updates.
+  - `PdfViewer.tsx`: Undo (`Ctrl+Z`), Redo (`Ctrl+Y`), Rotate 90° CW/CCW/180°, Delete (`Delete`), Move Up/Down toolbar controls and keyboard shortcuts.
+- **Exhaustive Unit Tests (`tests/unit/page-model.test.ts`)**:
+  - Verified initial state, rotation accumulation modulo 360°, deletion and active page filtering, move reordering, relative move up/down, and full undo/redo round-trip returning to identical original state.
+- **E2E Acceptance Test (`tests/e2e/page-operations.spec.ts`)**:
+  - Verified 90° CW, 180°, and -90° CCW rotations in both main canvas and thumbnail.
+  - Verified multi-step undo/redo restoring rotations.
+  - Verified page deletion updating active count (`/ 10` -> `/ 9`), removing DOM container, and undo restoring it.
+  - Verified keyboard Move Down / Move Up reordering.
+  - Verified HTML5 drag-and-drop reorder and undo.
+  - Verified shift multi-select delete and undo.
+
+### Test Verification Results
+- `pnpm check`:
+  - ESLint: 0 errors, 0 warnings.
+  - Typecheck: 0 errors.
+  - Vitest: 6 test files, 22 tests passed (594ms).
+- `pnpm build`:
+  - Production bundle & PWA service worker built cleanly (1.09s).
+- `pnpm test:e2e`:
+  - 4 passed (3.3s) on Chromium (`smoke.spec.ts`, `viewer.spec.ts`, `thumbnails.spec.ts`, `page-operations.spec.ts`).
+
+### Dependencies Added
+- None (leveraged existing dependencies).
+
+### Open Questions
+- None.

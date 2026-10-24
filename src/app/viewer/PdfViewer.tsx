@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PdfDocument } from '../../engine';
+import { PageListModel } from '../../engine/page-model';
 import type { PageSize } from '../../shared/protocol';
 import {
   DEFAULT_ZOOM,
@@ -16,25 +17,46 @@ import { TileCache } from './tile-cache';
 export interface PdfViewerProps {
   doc: PdfDocument;
   initialZoom?: number;
+  initialPageModel?: PageListModel;
 }
 
-export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT_ZOOM }) => {
+export const PdfViewer: React.FC<PdfViewerProps> = ({
+  doc,
+  initialZoom = DEFAULT_ZOOM,
+  initialPageModel,
+}) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [zoom, setZoom] = useState<number>(initialZoom);
   const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
   const [scrollTop, setScrollTop] = useState<number>(0);
   const [viewportHeight, setViewportHeight] = useState<number>(800);
   const [viewportWidth, setViewportWidth] = useState<number>(1000);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [currentPageId, setCurrentPageId] = useState<string | null>(null);
   const [pageInput, setPageInput] = useState<string>('1');
   const [generation, setGeneration] = useState<number>(1);
   const [tileRenderCount, setTileRenderCount] = useState<number>(0);
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
 
+  // Non-destructive page list model & command manager
+  const [pageModel] = useState<PageListModel>(
+    () => initialPageModel ?? PageListModel.fromDocument(doc.docId, doc.pageCount)
+  );
+  const [, setModelVersion] = useState<number>(0);
+  const [selectedPageIds, setSelectedPageIds] = useState<Set<string>>(new Set());
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
+
   const tileCache = useMemo(() => new TileCache(128 * 1024 * 1024), []);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
-  // Load all page dimensions on mount
+  // Subscribe to model changes (rotations, deletions, reordering, undo/redo)
+  useEffect(() => {
+    return pageModel.subscribe(() => {
+      setModelVersion((v) => v + 1);
+      setGeneration((g) => g + 1);
+    });
+  }, [pageModel]);
+
+  // Load all base page dimensions on mount
   useEffect(() => {
     let active = true;
 
@@ -73,23 +95,35 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
     return () => ro.disconnect();
   }, []);
 
-  // Compute cumulative vertical layout
+  const activePages = pageModel.getActivePages();
+
+  // Compute cumulative vertical layout considering rotation dimensions
   const pageLayouts = useMemo(() => {
     let top = 0;
-    return pageSizes.map((size, index) => {
-      const width = size.width * zoom;
-      const height = size.height * zoom;
-      const layout = { index, top, width, height, size };
+    return activePages.map((entry, index) => {
+      const size = pageSizes[entry.sourcePageIndex] || { width: 612, height: 792, rotate: 0 };
+      const isRotatedQuarter = entry.rotationDelta === 90 || entry.rotationDelta === 270;
+      const width = (isRotatedQuarter ? size.height : size.width) * zoom;
+      const height = (isRotatedQuarter ? size.width : size.height) * zoom;
+
+      const layout = { index, entry, top, width, height, size };
       top += height + PAGE_GAP;
       return layout;
     });
-  }, [pageSizes, zoom]);
+  }, [activePages, pageSizes, zoom]);
 
   const totalHeight = useMemo(() => {
     if (pageLayouts.length === 0) return 0;
     const last = pageLayouts[pageLayouts.length - 1];
     return last ? last.top + last.height : 0;
   }, [pageLayouts]);
+
+  // Set initial active page ID
+  useEffect(() => {
+    if (!currentPageId && activePages[0]) {
+      setCurrentPageId(activePages[0].id);
+    }
+  }, [activePages, currentPageId]);
 
   // Compute viewport bounds (including 1-viewport margin buffer)
   const marginPx = viewportHeight * VIEWPORT_MARGIN;
@@ -104,7 +138,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
     });
   }, [pageLayouts, bufferTop, bufferBottom]);
 
-  // Handle scroll and update current active page index
+  // Handle scroll and update current active page ID
   const handleScroll = useCallback(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -116,13 +150,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
     const center = currentScrollTop + container.clientHeight / 2;
     const active = pageLayouts.find((l) => center >= l.top && center <= l.top + l.height);
     if (active) {
-      const pageNum = active.index + 1;
-      setCurrentPage(pageNum);
-      setPageInput(String(pageNum));
+      setCurrentPageId(active.entry.id);
+      setPageInput(String(active.index + 1));
     }
   }, [pageLayouts]);
 
-  // Invalidate render generation on zoom change
   const applyZoom = useCallback((newZoom: number) => {
     setZoom(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(newZoom * 100) / 100)));
     setGeneration((g) => g + 1);
@@ -132,25 +164,27 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
   const zoomOut = useCallback(() => applyZoom(zoom - ZOOM_STEP), [applyZoom, zoom]);
 
   const fitWidth = useCallback(() => {
-    if (pageSizes.length === 0 || !pageSizes[0]) return;
-    const availableWidth = viewportWidth - (showSidebar ? 180 : 0) - 64; // account for sidebar & padding
-    const targetZoom = availableWidth / pageSizes[0].width;
+    if (pageLayouts.length === 0 || !pageLayouts[0]) return;
+    const availableWidth = viewportWidth - (showSidebar ? 180 : 0) - 64;
+    const targetZoom = availableWidth / (pageLayouts[0].size.width || 612);
     applyZoom(targetZoom);
-  }, [pageSizes, viewportWidth, showSidebar, applyZoom]);
+  }, [pageLayouts, viewportWidth, showSidebar, applyZoom]);
 
   const fitPage = useCallback(() => {
-    if (pageSizes.length === 0 || !pageSizes[0]) return;
+    if (pageLayouts.length === 0 || !pageLayouts[0]) return;
     const availableHeight = viewportHeight - 64;
-    const targetZoom = availableHeight / pageSizes[0].height;
+    const targetZoom = availableHeight / (pageLayouts[0].size.height || 792);
     applyZoom(targetZoom);
-  }, [pageSizes, viewportHeight, applyZoom]);
+  }, [pageLayouts, viewportHeight, applyZoom]);
 
-  // Jump to page
-  const scrollToPage = useCallback(
-    (pageNumber: number) => {
-      const target = pageLayouts[pageNumber - 1];
+  // Jump to page by ID or number
+  const scrollToPageId = useCallback(
+    (pageId: string) => {
+      const target = pageLayouts.find((l) => l.entry.id === pageId);
       if (target && containerRef.current) {
         containerRef.current.scrollTo({ top: target.top, behavior: 'smooth' });
+        setCurrentPageId(pageId);
+        setPageInput(String(target.index + 1));
       }
     },
     [pageLayouts]
@@ -159,21 +193,124 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
   const handlePageInputSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const num = parseInt(pageInput, 10);
-    if (!isNaN(num) && num >= 1 && num <= doc.pageCount) {
-      scrollToPage(num);
+    if (!isNaN(num) && num >= 1 && num <= activePages.length) {
+      const target = pageLayouts[num - 1];
+      if (target) {
+        scrollToPageId(target.entry.id);
+      }
     } else {
-      setPageInput(String(currentPage));
+      const currentIdx = activePages.findIndex((p) => p.id === currentPageId);
+      setPageInput(String(currentIdx >= 0 ? currentIdx + 1 : 1));
     }
   };
 
-  // Keyboard navigation & zoom shortcuts
+  // Multi-selection management (Click, Ctrl-Click, Shift-Click)
+  const handleToggleSelect = useCallback(
+    (pageId: string, isShift: boolean, isCtrl: boolean) => {
+      setSelectedPageIds((prev) => {
+        const next = new Set(prev);
+
+        if (isShift && lastSelectedId) {
+          // Range selection between lastSelectedId and pageId
+          const startIdx = activePages.findIndex((p) => p.id === lastSelectedId);
+          const endIdx = activePages.findIndex((p) => p.id === pageId);
+          if (startIdx !== -1 && endIdx !== -1) {
+            const min = Math.min(startIdx, endIdx);
+            const max = Math.max(startIdx, endIdx);
+            for (let i = min; i <= max; i++) {
+              const p = activePages[i];
+              if (p) next.add(p.id);
+            }
+          }
+        } else if (isCtrl) {
+          // Toggle selection
+          if (next.has(pageId)) {
+            next.delete(pageId);
+          } else {
+            next.add(pageId);
+          }
+          setLastSelectedId(pageId);
+        } else {
+          // Single selection
+          next.clear();
+          next.add(pageId);
+          setLastSelectedId(pageId);
+        }
+
+        return next;
+      });
+    },
+    [activePages, lastSelectedId]
+  );
+
+  const selectAll = useCallback(() => {
+    setSelectedPageIds(new Set(activePages.map((p) => p.id)));
+  }, [activePages]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedPageIds(new Set());
+  }, []);
+
+  const getTargetPageIds = useCallback(() => {
+    if (selectedPageIds.size > 0) {
+      return Array.from(selectedPageIds);
+    }
+    return currentPageId ? [currentPageId] : [];
+  }, [selectedPageIds, currentPageId]);
+
+  // Operations handlers
+  const handleRotate = useCallback(
+    (degrees: 90 | -90 | 180) => {
+      const targets = getTargetPageIds();
+      pageModel.rotatePages(targets, degrees);
+    },
+    [pageModel, getTargetPageIds]
+  );
+
+  const handleDelete = useCallback(() => {
+    const targets = getTargetPageIds();
+    pageModel.deletePages(targets);
+    setSelectedPageIds(new Set());
+  }, [pageModel, getTargetPageIds]);
+
+  const handleMoveUp = useCallback(() => {
+    const targets = getTargetPageIds();
+    pageModel.movePagesRelative(targets, 'up');
+  }, [pageModel, getTargetPageIds]);
+
+  const handleMoveDown = useCallback(() => {
+    const targets = getTargetPageIds();
+    pageModel.movePagesRelative(targets, 'down');
+  }, [pageModel, getTargetPageIds]);
+
+  // Keyboard navigation & operations shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          pageModel.redo();
+        } else {
+          pageModel.undo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        pageModel.redo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        selectAll();
+      } else if (e.key === 'Escape') {
+        clearSelection();
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedPageIds.size > 0) {
+          e.preventDefault();
+          handleDelete();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
         e.preventDefault();
         zoomIn();
       } else if ((e.ctrlKey || e.metaKey) && e.key === '-') {
@@ -187,24 +324,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [zoomIn, zoomOut, fitWidth]);
-
-  // Pinch / Wheel zoom with ctrlKey
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      if (e.ctrlKey) {
-        e.preventDefault();
-        const delta = -e.deltaY * 0.005;
-        applyZoom(zoom + delta);
-      }
-    };
-
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    return () => container.removeEventListener('wheel', handleWheel);
-  }, [zoom, applyZoom]);
+  }, [pageModel, selectedPageIds, selectAll, clearSelection, handleDelete, zoomIn, zoomOut, fitWidth]);
 
   return (
     <div
@@ -216,18 +336,19 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
         backgroundColor: '#f1f3f4',
       }}
     >
-      {/* Viewer Toolbar */}
+      {/* Primary Toolbar: Zoom & Navigation */}
       <div
         data-testid="viewer-toolbar"
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
+          gap: '8px',
           padding: '8px 16px',
           backgroundColor: '#ffffff',
           borderBottom: '1px solid #e0e0e0',
           boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
           zIndex: 10,
+          flexWrap: 'wrap',
         }}
       >
         <button
@@ -249,18 +370,75 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
         <button onClick={zoomOut} data-testid="zoom-out-btn" title="Zoom Out (-)">
           -
         </button>
-        <span data-testid="zoom-display" style={{ minWidth: '48px', textAlign: 'center' }}>
+        <span data-testid="zoom-display" style={{ minWidth: '44px', textAlign: 'center' }}>
           {Math.round(zoom * 100)}%
         </span>
         <button onClick={zoomIn} data-testid="zoom-in-btn" title="Zoom In (+)">
           +
         </button>
         <button onClick={fitWidth} data-testid="fit-width-btn" title="Fit Width (Ctrl+0)">
-          พอดีความกว้าง (Fit Width)
+          พอดีความกว้าง
         </button>
         <button onClick={fitPage} data-testid="fit-page-btn" title="Fit Page">
-          พอดีหน้า (Fit Page)
+          พอดีหน้า
         </button>
+
+        {/* Undo / Redo controls */}
+        <div style={{ display: 'flex', gap: '4px', marginLeft: '8px', borderLeft: '1px solid #dadce0', paddingLeft: '8px' }}>
+          <button
+            onClick={() => pageModel.undo()}
+            disabled={!pageModel.canUndo}
+            data-testid="undo-btn"
+            title="Undo (Ctrl+Z)"
+            style={{
+              padding: '4px 8px',
+              cursor: pageModel.canUndo ? 'pointer' : 'not-allowed',
+              opacity: pageModel.canUndo ? 1 : 0.5,
+            }}
+          >
+            ↶ ย้อนกลับ (Undo)
+          </button>
+          <button
+            onClick={() => pageModel.redo()}
+            disabled={!pageModel.canRedo}
+            data-testid="redo-btn"
+            title="Redo (Ctrl+Y)"
+            style={{
+              padding: '4px 8px',
+              cursor: pageModel.canRedo ? 'pointer' : 'not-allowed',
+              opacity: pageModel.canRedo ? 1 : 0.5,
+            }}
+          >
+            ↷ ทำซ้ำ (Redo)
+          </button>
+        </div>
+
+        {/* Page Operations Actions */}
+        <div style={{ display: 'flex', gap: '4px', marginLeft: '8px', borderLeft: '1px solid #dadce0', paddingLeft: '8px' }}>
+          <button onClick={() => handleRotate(90)} data-testid="rotate-cw-btn" title="Rotate 90° Clockwise">
+            ↻ หมุนขวา 90°
+          </button>
+          <button onClick={() => handleRotate(-90)} data-testid="rotate-ccw-btn" title="Rotate 90° Counter-Clockwise">
+            ↺ หมุนซ้าย 90°
+          </button>
+          <button onClick={() => handleRotate(180)} data-testid="rotate-180-btn" title="Rotate 180°">
+            180°
+          </button>
+          <button
+            onClick={handleDelete}
+            data-testid="delete-page-btn"
+            title="Delete Selected Page(s)"
+            style={{ color: '#d93025' }}
+          >
+            🗑 ลบหน้า
+          </button>
+          <button onClick={handleMoveUp} data-testid="move-up-btn" title="Move Up">
+            ↑ เลื่อนขึ้น
+          </button>
+          <button onClick={handleMoveDown} data-testid="move-down-btn" title="Move Down">
+            ↓ เลื่อนลง
+          </button>
+        </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <form onSubmit={handlePageInputSubmit} style={{ display: 'inline' }}>
@@ -272,7 +450,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
               onChange={(e) => setPageInput(e.target.value)}
               style={{ width: '42px', textAlign: 'center' }}
             />
-            <span> / {doc.pageCount}</span>
+            <span> / {activePages.length}</span>
           </form>
           <span
             data-testid="live-tile-count"
@@ -287,9 +465,11 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
         <ThumbnailSidebar
           doc={doc}
-          pageCount={doc.pageCount}
-          currentPage={currentPage}
-          onSelectPage={scrollToPage}
+          pageModel={pageModel}
+          currentPageId={currentPageId}
+          selectedPageIds={selectedPageIds}
+          onSelectPage={scrollToPageId}
+          onToggleSelect={handleToggleSelect}
           isOpen={showSidebar}
         />
 
@@ -316,7 +496,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
           >
             {visiblePages.map((layout) => (
               <div
-                key={layout.index}
+                key={layout.entry.id}
                 style={{
                   position: 'absolute',
                   top: `${layout.top}px`,
@@ -326,7 +506,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({ doc, initialZoom = DEFAULT
               >
                 <PageView
                   doc={doc}
-                  pageIndex={layout.index}
+                  pageEntry={layout.entry}
                   pageSize={layout.size}
                   scale={zoom}
                   dpr={dpr}
