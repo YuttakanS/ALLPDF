@@ -1,0 +1,83 @@
+export const th = {
+  // Toolbar
+  'toolbar.toggleSidebar': 'หน้าตัวอย่าง',
+  'toolbar.zoomOut': 'ย่อ (-)',
+  'toolbar.zoomIn': 'ขยาย (+)',
+  'toolbar.fitWidth': 'พอดีความกว้าง',
+  'toolbar.fitPage': 'พอดีหน้า',
+  'toolbar.undo': 'ย้อนกลับ',
+  'toolbar.redo': 'ทำซ้ำ',
+  'toolbar.rotateCw': 'หมุนขวา 90°',
+  'toolbar.rotateCcw': 'หมุนซ้าย 90°',
+  'toolbar.rotate180': '180°',
+  'toolbar.delete': 'ลบ',
+  'toolbar.moveUp': 'เลื่อนขึ้น',
+  'toolbar.moveDown': 'เลื่อนลง',
+  'toolbar.merge': 'รวมไฟล์ (Merge)',
+  'toolbar.split': 'แบ่งหน้า (Split)',
+  'toolbar.export': 'ส่งออก (Export)',
+  'toolbar.help': 'วิธีใช้ (Help)',
+  'toolbar.page': 'หน้า',
+  'toolbar.of': '/',
+  'toolbar.renderedTiles': 'เรนเดอร์ไทล์',
+  'toolbar.cached': 'แคช',
+  'toolbar.language': 'ภาษา (Language)',
+
+  // Sidebar
+  'sidebar.activeDocs': 'เอกสารที่เปิดอยู่ ({count})',
+  'sidebar.pageLabel': 'หน้า {n}',
+  'sidebar.collapseDoc': 'ซ่อนหน้า',
+  'sidebar.expandDoc': 'แสดงหน้า',
+  'sidebar.removeDoc': 'ลบเอกสารนี้',
+  'sidebar.primaryDoc': 'เอกสารหลัก (Primary)',
+
+  // Split dialog
+  'split.title': '✂ แบ่งหน้าเอกสาร (Split PDF)',
+  'split.tabRanges': 'ระบุช่วงหน้า (Ranges)',
+  'split.tabEveryN': 'ทุกๆ N หน้า (Every N)',
+  'split.tabSelected': 'หน้าที่เลือก ({count})',
+  'split.rangeLabel': 'ระบุช่วงหน้า (เช่น 1-3, 5, 8-):',
+  'split.rangeHelp': 'รองรับ: รายหน้า (5), ช่วงหน้า (1-3), ตั้งแต่หน้าถึงจบ (8-), ตั้งแต่หน้า 1 (-4)',
+  'split.intervalLabel': 'แบ่งไฟล์ทุกๆ กี่หน้า:',
+  'split.selectedSummary': 'เลือกไว้ทั้งหมด {count} หน้า จากทั้งหมด {total} หน้า',
+  'split.selectedIndividual': 'แยก 1 ไฟล์ต่อ 1 หน้า',
+  'split.selectedCombined': 'รวมหน้าที่เลือกเป็น 1 ไฟล์',
+  'split.previewSingle': 'จะสร้าง 1 ไฟล์ PDF: {filename}',
+  'split.previewZip': 'จะสร้าง {count} ไฟล์ บรรจุในไฟล์ .zip: {names}',
+  'split.cancel': 'ยกเลิก (Cancel)',
+  'split.confirm': 'แบ่งไฟล์และดาวน์โหลด (Split & Download)',
+  'split.processing': 'กำลังประมวลผล...',
+
+  // Help Dialog
+  'help.title': 'ℹ️ วิธีใช้งานและคีย์ลัด (Keyboard Shortcuts)',
+  'help.close': 'ปิด',
+  'help.navigationCategory': 'การซูมและมุมมอง (View & Zoom)',
+  'help.zoomIn': 'ขยายมุมมอง (+)',
+  'help.zoomOut': 'ย่อมุมมอง (-)',
+  'help.fitWidth': 'พอดีความกว้างหน้าต่าง (Ctrl+0)',
+  'help.operationsCategory': 'การจัดการหน้า (Page Operations)',
+  'help.undo': 'ย้อนกลับการกระทำล่าสุด (Ctrl+Z)',
+  'help.redo': 'ทำซ้ำการกระทำล่าสุด (Ctrl+Y)',
+  'help.rotateCw': 'หมุนหน้า 90° ตามเข็มนาฬิกา',
+  'help.delete': 'ลบหน้าที่เลือก (Delete / Backspace)',
+  'help.selectAll': 'เลือกหน้าทั้งหมด (Ctrl+A)',
+  'help.clearSelection': 'ยกเลิกการเลือก (Escape)',
+  'help.helpKey': 'เปิดคู่มือวิธีใช้นี้ (F1 / ?)',
+
+  // Toast Notifications
+  'toast.rotateSuccess': 'หมุนหน้าเอกสารสำเร็จ',
+  'toast.deleteSuccess': 'ลบหน้าสำเร็จ (สามารถกดย้อนกลับได้)',
+  'toast.moveSuccess': 'จัดเรียงหน้าเอกสารใหม่แล้ว',
+  'toast.mergeSuccess': 'เพิ่มเอกสารสำเร็จ ({count} หน้า)',
+  'toast.removeDocSuccess': 'ลบเอกสารสำเร็จ',
+  'toast.exportSuccess': 'บันทึกเอกสารสำเร็จ',
+  'toast.splitSuccess': 'แบ่งไฟล์เอกสารสำเร็จ',
+  'toast.undoSuccess': 'ย้อนกลับสำเร็จ',
+  'toast.redoSuccess': 'ทำซ้ำสำเร็จ',
+
+  // Progress & Warnings
+  'progress.loading': 'กำลังประมวลผล...',
+  'warning.prefix': '⚠️ ข้อควรระวัง:',
+};
+
+export type TranslationKey = keyof typeof th;

@@ -1,0 +1,83 @@
+import type { TranslationKey } from './th';
+
+export const en: Record<TranslationKey, string> = {
+  // Toolbar
+  'toolbar.toggleSidebar': 'Thumbnails',
+  'toolbar.zoomOut': 'Zoom Out (-)',
+  'toolbar.zoomIn': 'Zoom In (+)',
+  'toolbar.fitWidth': 'Fit Width',
+  'toolbar.fitPage': 'Fit Page',
+  'toolbar.undo': 'Undo',
+  'toolbar.redo': 'Redo',
+  'toolbar.rotateCw': 'Rotate 90°',
+  'toolbar.rotateCcw': 'Rotate -90°',
+  'toolbar.rotate180': '180°',
+  'toolbar.delete': 'Delete',
+  'toolbar.moveUp': 'Move Up',
+  'toolbar.moveDown': 'Move Down',
+  'toolbar.merge': 'Merge',
+  'toolbar.split': 'Split',
+  'toolbar.export': 'Export',
+  'toolbar.help': 'Help',
+  'toolbar.page': 'Page',
+  'toolbar.of': '/',
+  'toolbar.renderedTiles': 'Rendered tiles',
+  'toolbar.cached': 'Cached',
+  'toolbar.language': 'Language',
+
+  // Sidebar
+  'sidebar.activeDocs': 'Open Documents ({count})',
+  'sidebar.pageLabel': 'Page {n}',
+  'sidebar.collapseDoc': 'Collapse pages',
+  'sidebar.expandDoc': 'Expand pages',
+  'sidebar.removeDoc': 'Remove document',
+  'sidebar.primaryDoc': 'Primary Document',
+
+  // Split dialog
+  'split.title': '✂ Split PDF Document',
+  'split.tabRanges': 'Page Ranges',
+  'split.tabEveryN': 'Every N Pages',
+  'split.tabSelected': 'Selected Pages ({count})',
+  'split.rangeLabel': 'Enter page ranges (e.g. 1-3, 5, 8-):',
+  'split.rangeHelp': 'Supports: single (5), range (1-3), open-end (8-), open-start (-4)',
+  'split.intervalLabel': 'Pages per split file:',
+  'split.selectedSummary': 'Selected {count} of {total} pages',
+  'split.selectedIndividual': 'One file per page',
+  'split.selectedCombined': 'Combine selected into one file',
+  'split.previewSingle': 'Will create 1 PDF: {filename}',
+  'split.previewZip': 'Will create {count} files bundled into a .zip: {names}',
+  'split.cancel': 'Cancel',
+  'split.confirm': 'Split & Download',
+  'split.processing': 'Processing...',
+
+  // Help Dialog
+  'help.title': 'ℹ️ Guide & Keyboard Shortcuts',
+  'help.close': 'Close',
+  'help.navigationCategory': 'View & Zoom',
+  'help.zoomIn': 'Zoom In (+)',
+  'help.zoomOut': 'Zoom Out (-)',
+  'help.fitWidth': 'Fit Width (Ctrl+0)',
+  'help.operationsCategory': 'Page Operations',
+  'help.undo': 'Undo last action (Ctrl+Z)',
+  'help.redo': 'Redo last action (Ctrl+Y)',
+  'help.rotateCw': 'Rotate page 90° clockwise',
+  'help.delete': 'Delete selected page(s) (Delete / Backspace)',
+  'help.selectAll': 'Select all pages (Ctrl+A)',
+  'help.clearSelection': 'Clear selection (Escape)',
+  'help.helpKey': 'Open this help guide (F1 / ?)',
+
+  // Toast Notifications
+  'toast.rotateSuccess': 'Page rotated successfully',
+  'toast.deleteSuccess': 'Page deleted (press Undo to restore)',
+  'toast.moveSuccess': 'Pages reordered',
+  'toast.mergeSuccess': 'Document added ({count} pages)',
+  'toast.removeDocSuccess': 'Document removed',
+  'toast.exportSuccess': 'PDF exported successfully',
+  'toast.splitSuccess': 'PDF split successfully',
+  'toast.undoSuccess': 'Action undone',
+  'toast.redoSuccess': 'Action redone',
+
+  // Progress & Warnings
+  'progress.loading': 'Processing...',
+  'warning.prefix': '⚠️ Warning:',
+};

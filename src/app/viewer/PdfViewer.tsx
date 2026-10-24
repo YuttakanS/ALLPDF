@@ -10,6 +10,7 @@ import { PageListModel } from '../../engine/page-model';
 import { executeSplit, downloadFile, type SplitGroup } from '../../engine/split';
 import { saveOrDownloadPdf } from '../../engine/export';
 import type { ExportWarning, PageExportSpec, PageSize } from '../../shared/protocol';
+import { useI18n } from '../i18n';
 import {
   DEFAULT_ZOOM,
   FIT_PAGE_MARGIN,
@@ -20,10 +21,13 @@ import {
   VIEWPORT_MARGIN,
   ZOOM_STEP,
 } from './constants';
+import { HelpDialog } from './HelpDialog';
 import { PageView } from './PageView';
+import { ProgressIndicator } from './ProgressIndicator';
 import { SplitDialog } from './SplitDialog';
 import { ThumbnailSidebar } from './ThumbnailSidebar';
 import { TileCache } from './tile-cache';
+import { ToastContainer, type ToastItem } from './ToastContainer';
 
 export interface PdfViewerProps {
   doc: PdfDocument;
@@ -36,13 +40,14 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   initialZoom = DEFAULT_ZOOM,
   initialPageModel,
 }) => {
+  const { t, locale, toggleLocale } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [zoom, setZoom] = useState<number>(initialZoom);
   const [docs, setDocs] = useState<Map<string, PdfDocument>>(() => new Map([[doc.docId, doc]]));
   const [docMetaMap, setDocMetaMap] = useState<Record<string, { name: string; pageCount: number }>>(() => ({
-    [doc.docId]: { name: 'เอกสารหลัก (Primary)', pageCount: doc.pageCount },
+    [doc.docId]: { name: t('sidebar.primaryDoc'), pageCount: doc.pageCount },
   }));
   const [pageSizes, setPageSizes] = useState<Map<string, PageSize>>(new Map());
   const [scrollTop, setScrollTop] = useState<number>(0);
@@ -54,7 +59,21 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
   const [tileRenderCount, setTileRenderCount] = useState<number>(0);
   const [showSidebar, setShowSidebar] = useState<boolean>(true);
   const [showSplitDialog, setShowSplitDialog] = useState<boolean>(false);
+  const [showHelpDialog, setShowHelpDialog] = useState<boolean>(false);
   const [exportWarnings, setExportWarnings] = useState<ExportWarning[] | null>(null);
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [isBusy, setIsBusy] = useState<boolean>(false);
+  const [busyMessage, setBusyMessage] = useState<string>('');
+
+  // Mobile detection
+  const isMobile = viewportWidth <= 768;
+
+  // Auto-collapse sidebar on initial mobile load
+  useEffect(() => {
+    if (viewportWidth > 0 && viewportWidth <= 768) {
+      setShowSidebar(false);
+    }
+  }, [viewportWidth]);
 
   // Non-destructive page list model & command manager
   const [pageModel] = useState<PageListModel>(
@@ -66,6 +85,18 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
   const tileCache = useMemo(() => new TileCache(128 * 1024 * 1024), []);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+
+  const showToast = useCallback((message: string, type: 'info' | 'success' | 'warning' = 'info') => {
+    const id = `toast_${Date.now()}_${Math.random()}`;
+    setToasts((prev) => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((item) => item.id !== id));
+    }, 3000);
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((item) => item.id !== id));
+  }, []);
 
   // Subscribe to model changes (rotations, deletions, reordering, undo/redo, merges)
   useEffect(() => {
@@ -285,35 +316,41 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     (degrees: 90 | -90 | 180) => {
       const targets = getTargetPageIds();
       pageModel.rotatePages(targets, degrees);
+      showToast(t('toast.rotateSuccess'), 'success');
     },
-    [pageModel, getTargetPageIds]
+    [pageModel, getTargetPageIds, showToast, t]
   );
 
   const handleDelete = useCallback(() => {
     const targets = getTargetPageIds();
     pageModel.deletePages(targets);
     setSelectedPageIds(new Set());
-  }, [pageModel, getTargetPageIds]);
+    showToast(t('toast.deleteSuccess'), 'info');
+  }, [pageModel, getTargetPageIds, showToast, t]);
 
   const handleMoveUp = useCallback(() => {
     const targets = getTargetPageIds();
     pageModel.movePagesRelative(targets, 'up');
-  }, [pageModel, getTargetPageIds]);
+    showToast(t('toast.moveSuccess'), 'info');
+  }, [pageModel, getTargetPageIds, showToast, t]);
 
   const handleMoveDown = useCallback(() => {
     const targets = getTargetPageIds();
     pageModel.movePagesRelative(targets, 'down');
-  }, [pageModel, getTargetPageIds]);
+    showToast(t('toast.moveSuccess'), 'info');
+  }, [pageModel, getTargetPageIds, showToast, t]);
 
   // File Merge Handlers
   const handleAddFiles = useCallback(
     async (files: FileList | File[]) => {
       const list = Array.from(files);
-      for (const file of list) {
-        if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
-          continue;
-        }
-        try {
+      setIsBusy(true);
+      setBusyMessage(t('progress.loading'));
+      try {
+        for (const file of list) {
+          if (!file.name.toLowerCase().endsWith('.pdf') && file.type !== 'application/pdf') {
+            continue;
+          }
           const buffer = await file.arrayBuffer();
           const newDoc = await (doc.constructor as typeof PdfDocument).open(buffer, {
             client: doc.client,
@@ -327,39 +364,53 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
           await loadDocSizes(newDoc);
           pageModel.addDocumentPages(newDoc.docId, newDoc.pageCount);
-        } catch (err) {
-          console.error('Failed to open PDF for merge:', err);
+          showToast(t('toast.mergeSuccess', { count: newDoc.pageCount }), 'success');
         }
+      } catch (err) {
+        console.error('Failed to open PDF for merge:', err);
+      } finally {
+        setIsBusy(false);
       }
     },
-    [doc, loadDocSizes, pageModel]
+    [doc, loadDocSizes, pageModel, showToast, t]
   );
 
   const handleRemoveDoc = useCallback(
     (targetDocId: string) => {
       pageModel.removeDocument(targetDocId);
+      showToast(t('toast.removeDocSuccess'), 'info');
     },
-    [pageModel]
+    [pageModel, showToast, t]
   );
 
   // Split Handler
   const handleExecuteSplit = useCallback(
     async (groups: SplitGroup[]) => {
-      const active = pageModel.getActivePages();
-      const output = await executeSplit(
-        active,
-        groups,
-        (specs) => doc.client.exportPages(specs),
-        'split_document'
-      );
-      downloadFile(output);
+      setIsBusy(true);
+      setBusyMessage(t('progress.loading'));
+      try {
+        const active = pageModel.getActivePages();
+        const output = await executeSplit(
+          active,
+          groups,
+          (specs) => doc.client.exportPages(specs),
+          'split_document'
+        );
+        downloadFile(output);
+        showToast(t('toast.splitSuccess'), 'success');
+      } finally {
+        setIsBusy(false);
+      }
     },
-    [doc.client, pageModel]
+    [doc.client, pageModel, showToast, t]
   );
 
   const handleExport = useCallback(async () => {
     const active = pageModel.getActivePages();
     if (active.length === 0) return;
+
+    setIsBusy(true);
+    setBusyMessage(t('progress.loading'));
 
     const specs: PageExportSpec[] = active.map((p) => ({
       sourceDocId: p.sourceDocId,
@@ -375,10 +426,13 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         setExportWarnings(null);
       }
       await saveOrDownloadPdf(result.buffer, 'เอกสาร_ส่งออก.pdf');
+      showToast(t('toast.exportSuccess'), 'success');
     } catch (err) {
       console.error('Failed to export PDF:', err);
+    } finally {
+      setIsBusy(false);
     }
-  }, [doc.client, pageModel]);
+  }, [doc.client, pageModel, showToast, t]);
 
   const selectedActiveIndices = useMemo(() => {
     const active = pageModel.getActivePages();
@@ -404,6 +458,34 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
     }
   };
 
+  // Touch Pinch-to-Zoom handling on viewport container
+  const touchDistanceRef = useRef<number | null>(null);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && e.touches[0] && e.touches[1]) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      touchDistanceRef.current = Math.hypot(dx, dy);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (e.touches.length === 2 && e.touches[0] && e.touches[1] && touchDistanceRef.current !== null) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      const newDistance = Math.hypot(dx, dy);
+      const ratio = newDistance / touchDistanceRef.current;
+      if (Math.abs(ratio - 1) > 0.05) {
+        applyZoom(zoom * ratio);
+        touchDistanceRef.current = newDistance;
+      }
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchDistanceRef.current = null;
+  };
+
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -411,13 +493,19 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         return;
       }
 
+      if (e.key === 'F1' || (e.key === '?' && !e.ctrlKey && !e.metaKey)) {
+        e.preventDefault();
+        setShowHelpDialog((prev) => !prev);
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
         if (e.key === 'z' && !e.shiftKey) {
           e.preventDefault();
-          pageModel.undo();
+          if (pageModel.undo()) showToast(t('toast.undoSuccess'), 'info');
         } else if (e.key === 'y' || (e.key === 'z' && e.shiftKey)) {
           e.preventDefault();
-          pageModel.redo();
+          if (pageModel.redo()) showToast(t('toast.redoSuccess'), 'info');
         } else if (e.key === 'a') {
           e.preventDefault();
           selectAll();
@@ -441,7 +529,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [pageModel, zoomIn, zoomOut, fitWidth, handleDelete, selectAll, clearSelection]);
+  }, [pageModel, zoomIn, zoomOut, fitWidth, handleDelete, selectAll, clearSelection, showToast, t]);
 
   return (
     <div
@@ -458,6 +546,15 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         fontFamily: 'system-ui, -apple-system, sans-serif',
       }}
     >
+      {/* Toast Notifications */}
+      <ToastContainer toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Progress Indicator for long operations */}
+      <ProgressIndicator isLoading={isBusy} message={busyMessage} />
+
+      {/* Help Dialog Modal */}
+      <HelpDialog isOpen={showHelpDialog} onClose={() => setShowHelpDialog(false)} />
+
       {/* Hidden File Input for Merge */}
       <input
         ref={fileInputRef}
@@ -484,7 +581,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
       />
 
       {/* Top Application Toolbar */}
-      <div
+      <header
         data-testid="viewer-toolbar"
         style={{
           display: 'flex',
@@ -501,7 +598,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
         <button
           onClick={() => setShowSidebar((s) => !s)}
           data-testid="toggle-sidebar-btn"
-          title="Toggle Sidebar"
+          title={t('toolbar.toggleSidebar')}
           style={{
             padding: '4px 8px',
             backgroundColor: showSidebar ? '#e8f0fe' : '#f1f3f4',
@@ -511,89 +608,93 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
             cursor: 'pointer',
           }}
         >
-          ☰ หน้าตัวอย่าง
+          ☰ {t('toolbar.toggleSidebar')}
         </button>
 
         {/* Zoom controls */}
-        <button onClick={zoomOut} data-testid="zoom-out-btn" title="Zoom Out (-)">
+        <button onClick={zoomOut} data-testid="zoom-out-btn" title={t('toolbar.zoomOut')}>
           -
         </button>
         <span data-testid="zoom-display" style={{ minWidth: '44px', textAlign: 'center' }}>
           {Math.round(zoom * 100)}%
         </span>
-        <button onClick={zoomIn} data-testid="zoom-in-btn" title="Zoom In (+)">
+        <button onClick={zoomIn} data-testid="zoom-in-btn" title={t('toolbar.zoomIn')}>
           +
         </button>
-        <button onClick={fitWidth} data-testid="fit-width-btn" title="Fit Width (Ctrl+0)">
-          พอดีความกว้าง
+        <button onClick={fitWidth} data-testid="fit-width-btn" title={t('toolbar.fitWidth')}>
+          {t('toolbar.fitWidth')}
         </button>
-        <button onClick={fitPage} data-testid="fit-page-btn" title="Fit Page">
-          พอดีหน้า
+        <button onClick={fitPage} data-testid="fit-page-btn" title={t('toolbar.fitPage')}>
+          {t('toolbar.fitPage')}
         </button>
 
         {/* Undo / Redo controls */}
         <div style={{ display: 'flex', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #dadce0', paddingLeft: '6px' }}>
           <button
-            onClick={() => pageModel.undo()}
+            onClick={() => {
+              if (pageModel.undo()) showToast(t('toast.undoSuccess'), 'info');
+            }}
             disabled={!pageModel.canUndo}
             data-testid="undo-btn"
-            title="Undo (Ctrl+Z)"
+            title={t('toolbar.undo')}
             style={{
               padding: '4px 8px',
               cursor: pageModel.canUndo ? 'pointer' : 'not-allowed',
               opacity: pageModel.canUndo ? 1 : 0.5,
             }}
           >
-            ↶ ย้อนกลับ
+            ↶ {t('toolbar.undo')}
           </button>
           <button
-            onClick={() => pageModel.redo()}
+            onClick={() => {
+              if (pageModel.redo()) showToast(t('toast.redoSuccess'), 'info');
+            }}
             disabled={!pageModel.canRedo}
             data-testid="redo-btn"
-            title="Redo (Ctrl+Y)"
+            title={t('toolbar.redo')}
             style={{
               padding: '4px 8px',
               cursor: pageModel.canRedo ? 'pointer' : 'not-allowed',
               opacity: pageModel.canRedo ? 1 : 0.5,
             }}
           >
-            ↷ ทำซ้ำ
+            ↷ {t('toolbar.redo')}
           </button>
         </div>
 
         {/* Page Operations Actions */}
         <div style={{ display: 'flex', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #dadce0', paddingLeft: '6px' }}>
-          <button onClick={() => handleRotate(90)} data-testid="rotate-cw-btn" title="Rotate 90° Clockwise">
+          <button onClick={() => handleRotate(90)} data-testid="rotate-cw-btn" title={t('toolbar.rotateCw')}>
             ↻ 90°
           </button>
-          <button onClick={() => handleRotate(-90)} data-testid="rotate-ccw-btn" title="Rotate 90° Counter-Clockwise">
+          <button onClick={() => handleRotate(-90)} data-testid="rotate-ccw-btn" title={t('toolbar.rotateCcw')}>
             ↺ -90°
           </button>
-          <button onClick={() => handleRotate(180)} data-testid="rotate-180-btn" title="Rotate 180°">
+          <button onClick={() => handleRotate(180)} data-testid="rotate-180-btn" title={t('toolbar.rotate180')}>
             180°
           </button>
           <button
             onClick={handleDelete}
             data-testid="delete-page-btn"
-            title="Delete Selected Page(s)"
+            title={t('toolbar.delete')}
             style={{ color: '#d93025' }}
           >
-            🗑 ลบ
+            🗑 {t('toolbar.delete')}
           </button>
-          <button onClick={handleMoveUp} data-testid="move-up-btn" title="Move Up">
-            ↑ ขึ้น
+          <button onClick={handleMoveUp} data-testid="move-up-btn" title={t('toolbar.moveUp')}>
+            ↑ {t('toolbar.moveUp')}
           </button>
-          <button onClick={handleMoveDown} data-testid="move-down-btn" title="Move Down">
-            ↓ ลง
+          <button onClick={handleMoveDown} data-testid="move-down-btn" title={t('toolbar.moveDown')}>
+            ↓ {t('toolbar.moveDown')}
           </button>
         </div>
 
-        {/* Merge and Split Actions */}
+        {/* Merge, Split and Export Actions */}
         <div style={{ display: 'flex', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #dadce0', paddingLeft: '6px' }}>
           <button
             onClick={() => fileInputRef.current?.click()}
             data-testid="merge-file-btn"
-            title="Add PDF Files to Merge"
+            title={t('toolbar.merge')}
             style={{
               padding: '4px 8px',
               backgroundColor: '#e8f0fe',
@@ -604,12 +705,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               fontWeight: 500,
             }}
           >
-            ➕ รวมไฟล์ (Merge)
+            ➕ {t('toolbar.merge')}
           </button>
           <button
             onClick={() => setShowSplitDialog(true)}
             data-testid="open-split-btn"
-            title="Split PDF by Ranges, Interval, or Selection"
+            title={t('toolbar.split')}
             style={{
               padding: '4px 8px',
               backgroundColor: '#fef7e0',
@@ -620,12 +721,12 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               fontWeight: 500,
             }}
           >
-            ✂ แบ่งหน้า (Split)
+            ✂ {t('toolbar.split')}
           </button>
           <button
             onClick={handleExport}
             data-testid="export-pdf-btn"
-            title="Export Output PDF"
+            title={t('toolbar.export')}
             style={{
               padding: '4px 8px',
               backgroundColor: '#188038',
@@ -636,13 +737,49 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               fontWeight: 500,
             }}
           >
-            💾 ส่งออก (Export)
+            💾 {t('toolbar.export')}
+          </button>
+        </div>
+
+        {/* Utilities: Help & Language Switcher */}
+        <div style={{ display: 'flex', gap: '4px', marginLeft: '6px', borderLeft: '1px solid #dadce0', paddingLeft: '6px' }}>
+          <button
+            onClick={() => setShowHelpDialog(true)}
+            data-testid="help-btn"
+            title={t('toolbar.help')}
+            style={{
+              padding: '4px 8px',
+              backgroundColor: '#f1f3f4',
+              color: '#3c4043',
+              border: '1px solid #dadce0',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            ? {t('toolbar.help')}
+          </button>
+          <button
+            onClick={toggleLocale}
+            data-testid="language-toggle-btn"
+            title={t('toolbar.language')}
+            style={{
+              padding: '4px 8px',
+              backgroundColor: '#ffffff',
+              color: '#1a73e8',
+              border: '1px solid #1a73e8',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            🌐 {locale.toUpperCase()}
           </button>
         </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <form onSubmit={handlePageInputSubmit} style={{ display: 'inline' }}>
-            <span>หน้า </span>
+            <span>{t('toolbar.page')} </span>
             <input
               type="text"
               data-testid="page-number-input"
@@ -650,16 +787,16 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               onChange={(e) => setPageInput(e.target.value)}
               style={{ width: '42px', textAlign: 'center' }}
             />
-            <span> / {activePages.length}</span>
+            <span> {t('toolbar.of')} {activePages.length}</span>
           </form>
           <span
             data-testid="live-tile-count"
             style={{ fontSize: '0.8rem', color: '#666', marginLeft: '12px' }}
           >
-            Rendered tiles: {tileRenderCount} | Cached: {tileCache.size}
+            {t('toolbar.renderedTiles')}: {tileRenderCount} | {t('toolbar.cached')}: {tileCache.size}
           </span>
         </div>
-      </div>
+      </header>
 
       {/* Export Warnings Banner */}
       {exportWarnings && (
@@ -678,8 +815,10 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
           }}
         >
           <span>
-            ⚠️ ข้อควรระวัง:{' '}
-            {exportWarnings.map((w) => `${w.messageTh} (${w.messageEn})`).join(' | ')}
+            {t('warning.prefix')}{' '}
+            {exportWarnings
+              .map((w) => (locale === 'en' ? w.messageEn : `${w.messageTh} (${w.messageEn})`))
+              .join(' | ')}
           </span>
           <button
             onClick={() => setExportWarnings(null)}
@@ -698,30 +837,93 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
 
       {/* Main Body: Sidebar + Virtualized Page Viewport */}
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden', position: 'relative' }}>
-        <ThumbnailSidebar
-          doc={doc}
-          docs={docs}
-          docMetaMap={docMetaMap}
-          pageModel={pageModel}
-          currentPageId={currentPageId}
-          selectedPageIds={selectedPageIds}
-          onSelectPage={scrollToPageId}
-          onToggleSelect={handleToggleSelect}
-          onRemoveDoc={handleRemoveDoc}
-          isOpen={showSidebar}
-        />
+        {/* Desktop Sidebar OR Mobile Bottom Sheet */}
+        {isMobile ? (
+          showSidebar && (
+            <div
+              data-testid="mobile-bottom-sheet"
+              style={{
+                position: 'fixed',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: '50vh',
+                backgroundColor: '#ffffff',
+                borderTop: '2px solid #dadce0',
+                boxShadow: '0 -4px 16px rgba(0,0,0,0.2)',
+                zIndex: 500,
+                display: 'flex',
+                flexDirection: 'column',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '8px 12px',
+                  borderBottom: '1px solid #e0e0e0',
+                  backgroundColor: '#f8f9fa',
+                }}
+              >
+                <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{t('toolbar.toggleSidebar')}</span>
+                <button
+                  data-testid="close-mobile-sheet-btn"
+                  onClick={() => setShowSidebar(false)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.1rem' }}
+                >
+                  ✕
+                </button>
+              </div>
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <ThumbnailSidebar
+                  doc={doc}
+                  docs={docs}
+                  docMetaMap={docMetaMap}
+                  pageModel={pageModel}
+                  currentPageId={currentPageId}
+                  selectedPageIds={selectedPageIds}
+                  onSelectPage={(id) => {
+                    scrollToPageId(id);
+                    setShowSidebar(false);
+                  }}
+                  onToggleSelect={handleToggleSelect}
+                  onRemoveDoc={handleRemoveDoc}
+                  isOpen={true}
+                />
+              </div>
+            </div>
+          )
+        ) : (
+          <ThumbnailSidebar
+            doc={doc}
+            docs={docs}
+            docMetaMap={docMetaMap}
+            pageModel={pageModel}
+            currentPageId={currentPageId}
+            selectedPageIds={selectedPageIds}
+            onSelectPage={scrollToPageId}
+            onToggleSelect={handleToggleSelect}
+            onRemoveDoc={handleRemoveDoc}
+            isOpen={showSidebar}
+          />
+        )}
 
-        {/* Virtualized Vertical Page Container */}
-        <div
+        {/* Virtualized Vertical Page Container with Touch Pinch-to-Zoom */}
+        <main
           ref={containerRef}
           data-testid="viewer-container"
           onScroll={handleScroll}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
           style={{
             flex: 1,
             overflowY: 'auto',
             overflowX: 'auto',
             position: 'relative',
             padding: '24px 0',
+            touchAction: 'pan-x pan-y',
           }}
         >
           {/* Full scroll height spacer */}
@@ -761,7 +963,7 @@ export const PdfViewer: React.FC<PdfViewerProps> = ({
               );
             })}
           </div>
-        </div>
+        </main>
       </div>
     </div>
   );

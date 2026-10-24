@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { PdfDocument } from '../engine';
+import { I18nProvider } from './i18n';
 import { PdfViewer } from './viewer';
 
-export const App: React.FC = () => {
+export const AppContent: React.FC = () => {
   const [isIsolated, setIsIsolated] = useState<boolean>(false);
   const [doc, setDoc] = useState<PdfDocument | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -178,5 +179,13 @@ export const App: React.FC = () => {
         )}
       </main>
     </div>
+  );
+};
+
+export const App: React.FC = () => {
+  return (
+    <I18nProvider>
+      <AppContent />
+    </I18nProvider>
   );
 };

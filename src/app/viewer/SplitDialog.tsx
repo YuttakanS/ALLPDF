@@ -5,6 +5,7 @@ import {
   splitSelectedPages,
   type SplitGroup,
 } from '../../engine/split/range-parser';
+import { useI18n } from '../i18n';
 
 export interface SplitDialogProps {
   isOpen: boolean;
@@ -23,6 +24,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
   selectedActiveIndices,
   onExecuteSplit,
 }) => {
+  const { t, locale } = useI18n();
   const [mode, setMode] = useState<SplitMode>('ranges');
   const [rangeInput, setRangeInput] = useState<string>('');
   const [everyNInput, setEveryNInput] = useState<number>(2);
@@ -83,6 +85,9 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
     >
       <div
         data-testid="split-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="split-dialog-title"
         style={{
           backgroundColor: '#ffffff',
           borderRadius: '8px',
@@ -96,11 +101,12 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
         }}
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>
-            ✂ แบ่งหน้าเอกสาร (Split PDF)
+          <h2 id="split-dialog-title" style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>
+            {t('split.title')}
           </h2>
           <button
             onClick={onClose}
+            aria-label={t('split.cancel')}
             style={{
               background: 'none',
               border: 'none',
@@ -128,7 +134,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
               cursor: 'pointer',
             }}
           >
-            ระบุช่วงหน้า (Ranges)
+            {t('split.tabRanges')}
           </button>
           <button
             data-testid="tab-every-n"
@@ -143,7 +149,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
               cursor: 'pointer',
             }}
           >
-            ทุกๆ N หน้า (Every N)
+            {t('split.tabEveryN')}
           </button>
           <button
             data-testid="tab-selected"
@@ -158,7 +164,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
               cursor: 'pointer',
             }}
           >
-            หน้าที่เลือก ({selectedActiveIndices.length})
+            {t('split.tabSelected', { count: selectedActiveIndices.length })}
           </button>
         </div>
 
@@ -166,7 +172,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
         {mode === 'ranges' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <label style={{ fontSize: '0.875rem', color: '#3c4043' }}>
-              ระบุช่วงหน้า (เช่น <code>1-3, 5, 8-</code>):
+              {t('split.rangeLabel')}
             </label>
             <input
               type="text"
@@ -182,7 +188,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
               }}
             />
             <span style={{ fontSize: '0.75rem', color: '#70757a' }}>
-              รองรับ: รายหน้า (5), ช่วงหน้า (1-3), ตั้งแต่หน้าถึงจบ (8-), ตั้งแต่หน้า 1 (-4)
+              {t('split.rangeHelp')}
             </span>
           </div>
         )}
@@ -190,7 +196,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
         {mode === 'everyN' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <label style={{ fontSize: '0.875rem', color: '#3c4043' }}>
-              แบ่งไฟล์ทุกๆ กี่หน้า:
+              {t('split.intervalLabel')}
             </label>
             <input
               type="number"
@@ -213,7 +219,10 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
         {mode === 'selected' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             <p style={{ margin: 0, fontSize: '0.875rem', color: '#3c4043' }}>
-              เลือกหน้าไว้ทั้งหมด {selectedActiveIndices.length} หน้า จากทั้งหมด {totalActivePages} หน้า
+              {t('split.selectedSummary', {
+                count: selectedActiveIndices.length,
+                total: totalActivePages,
+              })}
             </p>
             <div style={{ display: 'flex', gap: '16px', marginTop: '4px' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
@@ -223,7 +232,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
                   checked={selectedMode === 'individual'}
                   onChange={() => setSelectedMode('individual')}
                 />
-                <span style={{ fontSize: '0.875rem' }}>แยก 1 ไฟล์ต่อ 1 หน้า</span>
+                <span style={{ fontSize: '0.875rem' }}>{t('split.selectedIndividual')}</span>
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
                 <input
@@ -232,7 +241,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
                   checked={selectedMode === 'combined'}
                   onChange={() => setSelectedMode('combined')}
                 />
-                <span style={{ fontSize: '0.875rem' }}>รวมหน้าที่เลือกเป็น 1 ไฟล์</span>
+                <span style={{ fontSize: '0.875rem' }}>{t('split.selectedCombined')}</span>
               </label>
             </div>
           </div>
@@ -251,7 +260,9 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
               fontSize: '0.825rem',
             }}
           >
-            {validationResult.error.messageTh} ({validationResult.error.messageEn})
+            {locale === 'en'
+              ? `${validationResult.error.messageEn} (${validationResult.error.messageTh})`
+              : `${validationResult.error.messageTh} (${validationResult.error.messageEn})`}
           </div>
         )}
 
@@ -268,14 +279,12 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
               fontSize: '0.825rem',
             }}
           >
-            {validationResult.groups.length === 1 ? (
-              <span>จะสร้าง 1 ไฟล์ PDF: {validationResult.groups[0]?.name}</span>
-            ) : (
-              <span>
-                จะสร้าง {validationResult.groups.length} ไฟล์ บรรจุในไฟล์ <code>.zip</code>:
-                {' ' + validationResult.groups.map((g) => g.name).join(', ')}
-              </span>
-            )}
+            {validationResult.groups.length === 1
+              ? t('split.previewSingle', { filename: validationResult.groups[0]?.name ?? '' })
+              : t('split.previewZip', {
+                  count: validationResult.groups.length,
+                  names: validationResult.groups.map((g) => g.name).join(', '),
+                })}
           </div>
         )}
 
@@ -293,7 +302,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
               color: '#3c4043',
             }}
           >
-            ยกเลิก (Cancel)
+            {t('split.cancel')}
           </button>
           <button
             data-testid="confirm-split-btn"
@@ -309,7 +318,7 @@ export const SplitDialog: React.FC<SplitDialogProps> = ({
               fontWeight: 500,
             }}
           >
-            {isProcessing ? 'กำลังประมวลผล...' : 'แบ่งไฟล์และดาวน์โหลด (Split & Download)'}
+            {isProcessing ? t('split.processing') : t('split.confirm')}
           </button>
         </div>
       </div>

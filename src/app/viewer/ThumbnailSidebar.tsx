@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import type { PdfDocument } from '../../engine';
 import type { PageEntry, PageListModel } from '../../engine/page-model';
+import { useI18n } from '../i18n';
 
 export const THUMBNAIL_ITEM_HEIGHT = 170;
 export const THUMBNAIL_WIDTH = 120;
@@ -49,6 +50,7 @@ const ThumbnailItem: React.FC<ThumbnailItemProps> = ({
   onDragOver,
   onDrop,
 }) => {
+  const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
@@ -180,7 +182,7 @@ const ThumbnailItem: React.FC<ThumbnailItemProps> = ({
             color: isSelected ? '#1a73e8' : '#5f6368',
           }}
         >
-          หน้า {displayIndex + 1}
+          {t('sidebar.pageLabel', { n: displayIndex + 1 })}
         </span>
       </div>
     </div>
@@ -199,6 +201,7 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
   onRemoveDoc,
   isOpen = true,
 }) => {
+  const { t } = useI18n();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(800);
@@ -294,10 +297,10 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
         }}
       >
         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: '#5f6368', marginBottom: '4px' }}>
-          เอกสารที่เปิดอยู่ ({docIds.length})
+          {t('sidebar.activeDocs', { count: docIds.length })}
         </div>
         {docIds.map((dId) => {
-          const meta = docMetaMap?.[dId] || { name: `เอกสาร (${dId.slice(0, 6)})`, pageCount: 0 };
+          const meta = docMetaMap?.[dId] || { name: t('sidebar.primaryDoc'), pageCount: 0 };
           const isCollapsed = pageModel.isDocCollapsed(dId);
           return (
             <div
@@ -331,7 +334,7 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
                 <button
                   data-testid={`collapse-doc-${dId}`}
                   onClick={() => pageModel.toggleDocCollapse(dId)}
-                  title={isCollapsed ? 'แสดงหน้า' : 'ซ่อนหน้า'}
+                  title={isCollapsed ? t('sidebar.expandDoc') : t('sidebar.collapseDoc')}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -348,7 +351,7 @@ export const ThumbnailSidebar: React.FC<ThumbnailSidebarProps> = ({
                   onClick={() =>
                     onRemoveDoc ? onRemoveDoc(dId) : pageModel.removeDocument(dId)
                   }
-                  title="ลบเอกสารนี้"
+                  title={t('sidebar.removeDoc')}
                   style={{
                     background: 'none',
                     border: 'none',

@@ -271,3 +271,42 @@
 
 ### Open Questions
 - None.
+
+## Phase 1.7: App Shell and UX: Localization & Accessibility (`branch: phase-1`)
+
+### What Was Done
+- **Type-Safe i18n System (`src/app/i18n/`)**:
+  - Full externalization of all UI strings with 100% key parity across Thai (default) and English.
+  - Parameterized string interpolation (e.g. `{count}`, `{n}`, `{filename}`).
+  - Persisted locale switching via `localStorage` with fallback to `th`.
+  - Zero hard-coded user-facing strings remaining in component trees.
+- **Accessible Keyboard Help Drawer ([`HelpDialog.tsx`](file:///D:/_Projects/ALLPDF/src/app/viewer/HelpDialog.tsx))**:
+  - Modal dialog documenting all keyboard shortcuts categorized by navigation, operations, and history.
+  - Triggerable via toolbar button (`[data-testid="help-btn"]`), `F1`, or `?` key.
+  - ARIA modal semantics and Escape key dismissal.
+- **Visual Feedback & Toast System ([`ToastContainer.tsx`](file:///D:/_Projects/ALLPDF/src/app/viewer/ToastContainer.tsx), [`ProgressIndicator.tsx`](file:///D:/_Projects/ALLPDF/src/app/viewer/ProgressIndicator.tsx))**:
+  - Floating non-blocking toast notifications for operations (rotate, delete, reorder, merge, split, export, undo/redo).
+  - Indeterminate progress indicator with 500ms debounce threshold for long-running operations.
+- **Mobile Responsive Layout**:
+  - Automatic sidebar collapse on mobile viewports ($\le 768$ px, e.g. 375×667).
+  - Slide-out bottom sheet drawer (`[data-testid="mobile-bottom-sheet"]`) on mobile screens.
+  - Multi-touch pinch-to-zoom gesture tracking on the viewport container.
+- **Acceptance & Verification**:
+  - Unit tests in [`tests/unit/i18n.test.ts`](file:///D:/_Projects/ALLPDF/tests/unit/i18n.test.ts): verified 100% key parity between Thai and English, interpolation, and character integrity.
+  - E2E acceptance tests in [`tests/e2e/app-shell-ux.spec.ts`](file:///D:/_Projects/ALLPDF/tests/e2e/app-shell-ux.spec.ts): verified Thai/English language toggle, help modal shortcut listings, toast feedback, and mobile viewport (375×667) bottom sheet behavior.
+
+### Test Verification Results
+- `pnpm check`:
+  - ESLint: 0 errors, 0 warnings.
+  - Typecheck: 0 errors.
+  - Vitest: 9 test files, 42 tests passed (635ms).
+- `pnpm build`:
+  - Production bundle & PWA service worker built cleanly (896ms).
+- `pnpm test:e2e`:
+  - 8 passed (3.5s) on Chromium across 7 test suites.
+
+### Dependencies Added
+- None (leveraged React 19 + TypeScript native context).
+
+### Open Questions
+- None.
